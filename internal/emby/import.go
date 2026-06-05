@@ -125,19 +125,27 @@ func importBatch() gin.HandlerFunc {
 	}
 }
 
-func getOrCreateLibrary(libType string) (*database.Library, error) {
+func getOrCreateLibrary(libName string) (*database.Library, error) {
 	var lib database.Library
-	result := database.Get().Where("type = ?", libType).First(&lib)
+	// 先按 name 查找库
+	result := database.Get().Where("name = ?", libName).First(&lib)
 
 	if result.Error == nil {
 		return &lib, nil
 	}
 
 	if result.Error == gorm.ErrRecordNotFound {
-		// 创建新库
+		// 创建新库，根据名称判断类型
+		libType := "movies"
+		if libName == "TV Shows" {
+			libType = "tvshows"
+		} else if libName == "Movies" {
+			libType = "movies"
+		}
+
 		lib = database.Library{
 			ID:   uuid.New().String(),
-			Name: libType,
+			Name: libName,
 			Type: libType,
 		}
 		if err := database.Get().Create(&lib).Error; err != nil {

@@ -16,17 +16,32 @@ import (
 func RegisterItemRoutes(router *gin.Engine) {
 	mediaSvc := service.NewMediaService(database.Get())
 
+	viewsHandler := getViews(mediaSvc)
+	itemsHandler := getItems(mediaSvc)
+	itemHandler := getItem(mediaSvc)
+	latestHandler := getLatest(mediaSvc)
+	countsHandler := getItemCounts(mediaSvc)
+	authMiddleware := AuthTokenMiddleware(30)
+
 	// 媒体库视图
-	router.GET("/emby/Users/:userId/Views", AuthTokenMiddleware(30), getViews(mediaSvc))
+	router.GET("/emby/Users/:userId/Views", authMiddleware, viewsHandler)
+	router.GET("/emby/users/:userId/views", authMiddleware, viewsHandler) // 小写版本
 
 	// 媒体列表
-	router.GET("/emby/Users/:userId/Items", AuthTokenMiddleware(30), getItems(mediaSvc))
+	router.GET("/emby/Users/:userId/Items", authMiddleware, itemsHandler)
+	router.GET("/emby/users/:userId/items", authMiddleware, itemsHandler) // 小写版本
 
 	// 媒体详情
-	router.GET("/emby/Users/:userId/Items/:itemId", AuthTokenMiddleware(30), getItem(mediaSvc))
+	router.GET("/emby/Users/:userId/Items/:itemId", authMiddleware, itemHandler)
+	router.GET("/emby/users/:userId/items/:itemId", authMiddleware, itemHandler) // 小写版本
 
 	// 最新添加
-	router.GET("/emby/Users/:userId/Items/Latest", AuthTokenMiddleware(30), getLatest(mediaSvc))
+	router.GET("/emby/Users/:userId/Items/Latest", authMiddleware, latestHandler)
+	router.GET("/emby/users/:userId/items/latest", authMiddleware, latestHandler) // 小写版本
+
+	// 媒体计数（RodelPlayer 需要这个端点来显示库统计）
+	router.GET("/emby/Items/Counts", authMiddleware, countsHandler)
+	router.GET("/emby/items/counts", authMiddleware, countsHandler) // 小写版本
 }
 
 func getViews(mediaSvc *service.MediaService) gin.HandlerFunc {
@@ -141,7 +156,7 @@ func getItem(mediaSvc *service.MediaService) gin.HandlerFunc {
 		}
 
 		// 转换为 DTO（包含所有字段）
-		fields := []string{"*"} // 包含所有字段
+		fields := []string{"*", "MediaSources"} // 包含所有字段，确保 MediaSources 被包含
 		dto := mediaSvc.ItemToDTO(item, userID, fields)
 
 		c.JSON(http.StatusOK, dto)
@@ -186,6 +201,45 @@ func getLatest(mediaSvc *service.MediaService) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, resp)
+	}
+}
+
+func getItemCounts(mediaSvc *service.MediaService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// /emby/Items/Counts - 返回不同类型媒体的计数
+		// RodelPlayer 使用这个来显示库的统计信息
+
+		// 获取所有项目
+		items, _, err := mediaSvc.GetItems(nil, true, nil, "", "", 10000, 0)
+		if err != nil {
+			slog.Error("获取媒体计数失败", "error", err)
+			c.JSON(http.StatusInternalServerError, ErrInternal)
+			return
+		}
+
+		// 统计各类型的数量
+		counts := gin.H{
+			"Movies":   0,
+			"Series":   0,
+			"Episodes": 0,
+			"Seasons":  0,
+			"Total":    len(items),
+		}
+
+		for _, item := range items {
+			switch item.Type {
+			case "Movie":
+				counts["Movies"] = counts["Movies"].(int) + 1
+			case "Series":
+				counts["Series"] = counts["Series"].(int) + 1
+			case "Episode":
+				counts["Episodes"] = counts["Episodes"].(int) + 1
+			case "Season":
+				counts["Seasons"] = counts["Seasons"].(int) + 1
+			}
+		}
+
+		c.JSON(http.StatusOK, counts)
 	}
 }
 
