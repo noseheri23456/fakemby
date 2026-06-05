@@ -1,0 +1,35 @@
+server:
+  host: "0.0.0.0"
+  port: 8096
+  name: "FakEmby Server"
+  version: "4.8.0.0"
+  id: "fakemby-xxxxx"
+
+database:
+  path: "./fakemby.db"
+  wal_mode: true
+
+auth:
+  token_expiry_days: 30
+
+image:
+  mode: "redirect"
+  cache_dir: "./cache/images"
+  cdn_prefix: ""
+
+playback:
+  redirect: true
+  sign_key: "change-me-in-production"
+  sign_ttl: 3600
+
+admin:
+  api_key: "change-me"
+
+tmdb:
+  api_key: ""
+  language: "zh-CN"
+  image_base: "https://image.tmdb.org/t/p/original"
+
+log:
+  level: "info"
+  file: "./logs/fakemby.log"

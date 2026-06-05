@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"F:\\\\codx\\\\fakemby\" -Force)",
+      "Bash(Select-Object Name, Mode)",
+      "WebFetch(domain:dev.emby.media)",
+      "PowerShell(Get-ChildItem -Path \"F:\\\\codx\\\\fakemby\" | Select-Object Name, @{Name=\"Type\";Expression={if\\($_.PSIsContainer\\){\"Directory\"}else{\"File\"}}} | Format-Table -AutoSize)",
+      "Bash(git init *)",
+      "Bash(go mod *)",
+      "Bash(go get *)",
+      "Bash(go build *)",
+      "Bash(./fakemby.exe)",
+      "Bash(curl http://localhost:8096/emby/System/Info/Public)",
+      "Bash(rm -f fakemby.db*)",
+      "Bash(curl -s -X POST http://localhost:8096/emby/Users/AuthenticateByName -H 'Content-Type: application/json' -d '{\"Username\":\"admin\",\"Pw\":\"admin\"}')",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s http://localhost:8096/emby/Users/Public)",
+      "Bash(curl -s -X POST http://localhost:8096/emby/Users/AuthenticateByName -H 'Content-Type: application/json' -H 'Authorization: Emby Client=TestClient, Device=TestDevice, DeviceId=123, Version=1.0.0.0' -d '{\"Username\":\"admin\",\"Pw\":\"admin\"}')",
+      "Bash(git add *)",
+      "Bash(git commit *)"
+    ]
+  }
+}
