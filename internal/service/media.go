@@ -264,3 +264,51 @@ func ParseFields(fieldsStr string) []string {
 	}
 	return fields
 }
+
+// GetSeasonsBySeriesID 获取剧集的所有季
+func (s *MediaService) GetSeasonsBySeriesID(seriesID string) ([]database.MediaItem, int64, error) {
+	var seasons []database.MediaItem
+	var total int64
+
+	query := s.db.Where("parent_id = ? AND type = ?", seriesID, "Season")
+	query.Model(&database.MediaItem{}).Count(&total)
+
+	if err := query.Order("season_number asc").Find(&seasons).Error; err != nil {
+		return nil, 0, err
+	}
+
+	return seasons, total, nil
+}
+
+// GetEpisodesBySeasonID 获取季的所有集
+func (s *MediaService) GetEpisodesBySeasonID(seasonID string) ([]database.MediaItem, int64, error) {
+	var episodes []database.MediaItem
+	var total int64
+
+	query := s.db.Where("parent_id = ? AND type = ?", seasonID, "Episode")
+	query.Model(&database.MediaItem{}).Count(&total)
+
+	if err := query.Order("episode_number asc").Find(&episodes).Error; err != nil {
+		return nil, 0, err
+	}
+
+	return episodes, total, nil
+}
+
+// GetEpisodesBySeriesID 获取剧集的所有集（所有季）
+func (s *MediaService) GetEpisodesBySeriesID(seriesID string) ([]database.MediaItem, int64, error) {
+	var episodes []database.MediaItem
+	var total int64
+
+	// 获取该 Series 的所有 Season，然后获取这些 Season 下的所有 Episode
+	// 使用子查询：WHERE parent_id IN (SELECT id FROM media_items WHERE parent_id = ? AND type = 'Season') AND type = 'Episode'
+	query := s.db.Where("parent_id IN (SELECT id FROM media_items WHERE parent_id = ? AND type = ?)", seriesID, "Season").
+		Where("type = ?", "Episode")
+	query.Model(&database.MediaItem{}).Count(&total)
+
+	if err := query.Order("season_number asc, episode_number asc").Find(&episodes).Error; err != nil {
+		return nil, 0, err
+	}
+
+	return episodes, total, nil
+}
