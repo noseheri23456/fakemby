@@ -17,7 +17,10 @@
       "Bash(curl -s http://localhost:8096/emby/Users/Public)",
       "Bash(curl -s -X POST http://localhost:8096/emby/Users/AuthenticateByName -H 'Content-Type: application/json' -H 'Authorization: Emby Client=TestClient, Device=TestDevice, DeviceId=123, Version=1.0.0.0' -d '{\"Username\":\"admin\",\"Pw\":\"admin\"}')",
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(python3 -m py_compile import_test_data.py)",
+      "Bash(python3 *)",
+      "Bash(bash -n import_test_data.sh)"
     ]
   }
 }
