@@ -142,9 +142,10 @@ fakemby/
 │   │   ├── users.go             # GET /emby/Users/*
 │   │   ├── items.go             # GET /emby/Users/*/Items, MediaItem details
 │   │   ├── shows.go             # GET /emby/Shows/* (Seasons/Episodes)
-│   │   ├── images.go            # GET /emby/Items/*/Images/*
+│   │   ├── images.go            # GET /emby/Items/*/Images/*, user avatars
 │   │   ├── playback.go          # PlaybackInfo, 302 stream redirects
 │   │   ├── sessions.go          # Playing/Playing/Progress/Stopped
+│   │   ├── userdata.go          # PlayedItems, FavoriteItems, Resume
 │   │   ├── search.go            # GET /emby/Search/Hints
 │   │   └── dto.go               # Response DTOs (BaseItemDto, etc.)
 │   ├── admin/                   # Admin REST APIs
@@ -203,11 +204,15 @@ All endpoints are prefixed with `/emby/` and follow the official Emby API specif
 **Endpoint categories:**
 1. System: `/emby/System/Info/Public` (no auth), `/emby/System/Info` (authenticated)
 2. Auth: `/emby/Users/AuthenticateByName`, `/emby/Sessions/Logout`, token management
-3. Browse: `/emby/Users/{id}/Items`, `/emby/Users/{id}/Items/{id}`, `/emby/Shows/{id}/Seasons`
-4. Images: `/emby/Items/{id}/Images/{type}` (redirect or proxy_cache modes)
+3. Browse: `/emby/Users/{id}/Items`, `/emby/Users/{id}/Items/{id}`, `/emby/Shows/{id}/Seasons`, `/emby/Users/{id}/Items/Latest`
+4. Images: 
+   - `/emby/Items/{id}/Images/{type}` - get primary image (supports MaxWidth/MaxHeight)
+   - `/emby/Items/{id}/Images/{type}/{index}` - get image by index
+   - `/emby/Users/{id}/Images/{type}` - get user avatar
+   - Mode: redirect (302) or proxy_cache (200 with file) per config
 5. Playback: `/emby/Items/{id}/PlaybackInfo`, `/emby/Videos/{id}/stream` (302 redirect), subtitles
 6. Progress: `/emby/Sessions/Playing`, `/emby/Sessions/Playing/Progress`, `/emby/Sessions/Playing/Stopped`
-7. User data: `/emby/Users/{id}/PlayedItems/{id}`, `/emby/Users/{id}/FavoriteItems/{id}`, Resume/Latest
+7. User data: `/emby/Users/{id}/PlayedItems/{id}`, `/emby/Users/{id}/FavoriteItems/{id}`, Resume, Latest
 
 #### 4. Admin API Layer (admin/)
 All admin endpoints use `/api/admin/` prefix and require `X-Api-Key` header matching `config.admin.api_key`.
@@ -235,9 +240,13 @@ All admin endpoints use `/api/admin/` prefix and require `X-Api-Key` header matc
 
 #### 5. Service Layer (service/)
 Handles business logic and database operations:
-- **media.go**: DB queries, model→DTO conversion with JSON field parsing (genres/studios/people as JSON arrays in DB)
+- **media.go**: DB queries, model→DTO conversion with JSON field parsing (genres/studios/people as JSON arrays in DB), image inheritance for Episode/Season
 - **auth.go**: password hashing (bcrypt), token generation (UUID), token cleanup goroutine
-- **image.go**: image redirect vs proxy_cache logic, MaxWidth/MaxHeight resizing
+- **image.go**: image redirect vs proxy_cache logic, MaxWidth/MaxHeight resizing, image caching to local disk, image inheritance (Episode/Season → Series)
+  - `GetImage()`: route to redirect or proxy_cache mode
+  - `getImageFromCache()`: download image to disk, cache hit check
+  - `GenerateImageTag()`: MD5-based tag for cache invalidation
+  - `GetInheritedImage()`: recursive parent lookup for missing images
 - **progress_buffer.go**: in-memory debouncing of playback progress (flushes every 30s to batch writes)
 - **url_signer.go**: HMAC-SHA256 signing for 302 redirect URLs (prevent unauthorized playback)
 - **tmdb.go** (optional): fetch metadata from TMDb API
@@ -275,6 +284,28 @@ Handles business logic and database operations:
 - Tokens stored in tokens table with created_at
 - Background task deletes expired tokens daily (TTL from config)
 - Default admin user created on first run if users table empty
+
+### 7. Image Processing (Phase 4)
+**Two modes supported via config.image.mode:**
+
+**Redirect Mode** (default):
+- Client requests `/emby/Items/{id}/Images/{type}`
+- Server returns `302 Found` with `Location: https://external-cdn-url`
+- Clients follow redirect to external CDN
+- Zero local storage, minimal server CPU
+
+**Proxy Cache Mode**:
+- Client requests `/emby/Items/{id}/Images/{type}`
+- Server downloads image to `cache_dir` if not already cached
+- Caches by `item_id/type_idx.jpg`
+- Returns `200 OK` with file content (Content-Type: image/jpeg)
+- Optional: MaxWidth/MaxHeight parameters trigger resize (using disintegration/imaging)
+- Image inheritance: Episode/Season without Primary image inherit from parent Series
+
+**Image Tag Generation:**
+- Tag = first 8 chars of MD5(image_url)
+- Included in BaseItemDto.ImageTags for cache invalidation
+- When URL changes, tag changes → client invalidates cached images automatically
 
 ## Configuration File (config.yaml)
 

@@ -224,6 +224,19 @@ func (s *MediaService) enrichImages(dto *types.BaseItemDto, itemID string) {
 			dto.ImageTags[img.Type] = img.Tag
 		}
 	}
+
+	// 如果是 Episode 或 Season，尝试继承父级的 Primary 图片
+	if (dto.Type == "Episode" || dto.Type == "Season") {
+		if _, hasPrimary := dto.ImageTags["Primary"]; !hasPrimary {
+			// 从父级查找 Primary 图片
+			if parentID := dto.ParentID; parentID != "" {
+				var parentImages []database.Image
+				if err := s.db.Where("item_id = ? AND type = ?", parentID, "Primary").Find(&parentImages).Error; err == nil && len(parentImages) > 0 {
+					dto.ImageTags["Primary"] = parentImages[0].Tag
+				}
+			}
+		}
+	}
 }
 
 func (s *MediaService) enrichMediaSources(dto *types.BaseItemDto, itemID string) {
