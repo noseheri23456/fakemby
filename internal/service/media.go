@@ -30,10 +30,9 @@ func (s *MediaService) GetItems(parentID *string, recursive bool, itemTypes []st
 	// 应用过滤条件
 	if parentID != nil {
 		query = query.Where("parent_id = ?", *parentID)
-	}
-
-	if !recursive && parentID != nil {
-		query = query.Where("parent_id = ?", *parentID)
+	} else if !recursive {
+		// 当没有指定 ParentId 且 recursive=false 时，只返回顶级项目
+		query = query.Where("parent_id IS NULL")
 	}
 
 	if len(itemTypes) > 0 {
@@ -56,8 +55,24 @@ func (s *MediaService) GetItems(parentID *string, recursive bool, itemTypes []st
 		sortOrder = "asc" // 默认值
 	}
 
+	// 应用排序（支持特殊排序方式如 Random）
 	if sortBy != "" {
-		query = query.Order(fmt.Sprintf("%s %s", sortBy, sortOrder))
+		switch strings.ToLower(sortBy) {
+		case "random":
+			// SQLite 使用 RANDOM() 函数实现随机排序
+			query = query.Order("RANDOM()")
+		case "name":
+			query = query.Order(fmt.Sprintf("name %s", sortOrder))
+		case "datecreated", "date_created":
+			query = query.Order(fmt.Sprintf("date_created %s", sortOrder))
+		case "year", "productionyear":
+			query = query.Order(fmt.Sprintf("year %s", sortOrder))
+		case "communityrating":
+			query = query.Order(fmt.Sprintf("community_rating %s", sortOrder))
+		default:
+			// 如果是其他列名，直接使用（用于灵活扩展）
+			query = query.Order(fmt.Sprintf("%s %s", sortBy, sortOrder))
+		}
 	}
 
 	// 应用分页

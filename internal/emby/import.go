@@ -2,6 +2,7 @@ package emby
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -36,6 +37,19 @@ type ImportItem struct {
 	Images          map[string]string      `json:"images"` // type -> URL
 	Sources         []ImportSource         `json:"sources"`
 	Subtitles       []ImportSubtitle       `json:"subtitles"`
+	Seasons         []ImportSeason         `json:"seasons"` // 嵌套的 Seasons（Series 内部）
+}
+
+type ImportSeason struct {
+	SeasonNumber *int           `json:"season_number"`
+	Episodes     []ImportEpisode `json:"episodes"`
+}
+
+type ImportEpisode struct {
+	Name          string         `json:"name"`
+	EpisodeNumber *int           `json:"episode_number"`
+	Overview      string         `json:"overview"`
+	Sources       []ImportSource `json:"sources"`
 }
 
 type ImportSource struct {
@@ -221,10 +235,74 @@ func importItem(tx *gorm.DB, libraryID string, item ImportItem, parentID *string
 		}
 	}
 
-	// 如果是 Series，自动创建 Seasons 和 Episodes
-	if item.Type == "Series" && len(item.Sources) == 0 {
-		// Series 通常不直接有 sources，它的 sources 由 Episode 提供
-		// 这里只是占位符
+	// 如果是 Series，创建嵌套的 Seasons 和 Episodes
+	if item.Type == "Series" && len(item.Seasons) > 0 {
+		for _, season := range item.Seasons {
+			seasonNum := 1
+			if season.SeasonNumber != nil {
+				seasonNum = *season.SeasonNumber
+			}
+
+			// 创建 Season
+			seasonItem := ImportItem{
+				Name:       fmt.Sprintf("Season %d", seasonNum),
+				Type:       "Season",
+				SeasonNumber: &seasonNum,
+			}
+
+			seasonID := uuid.New().String()
+			seasonDBItem := &database.MediaItem{
+				ID:           seasonID,
+				LibraryID:    libraryID,
+				ParentID:     &itemID,
+				Type:         "Season",
+				Name:         seasonItem.Name,
+				SeasonNumber: &seasonNum,
+			}
+
+			if err := tx.Create(seasonDBItem).Error; err != nil {
+				return err
+			}
+
+			// 创建 Episodes
+			for _, episode := range season.Episodes {
+				episodeNum := 1
+				if episode.EpisodeNumber != nil {
+					episodeNum = *episode.EpisodeNumber
+				}
+
+				episodeItem := &database.MediaItem{
+					ID:                 uuid.New().String(),
+					LibraryID:          libraryID,
+					ParentID:           &seasonID,
+					Type:               "Episode",
+					Name:               episode.Name,
+					Overview:           episode.Overview,
+					SeasonNumber:       &seasonNum,
+					EpisodeNumber:      &episodeNum,
+				}
+
+				if err := tx.Create(episodeItem).Error; err != nil {
+					return err
+				}
+
+				// 添加 Episode 的播放源
+				for _, src := range episode.Sources {
+					source := &database.MediaSource{
+						ID:        uuid.New().String(),
+						ItemID:    episodeItem.ID,
+						Name:      src.Name,
+						URL:       src.URL,
+						Protocol:  "Http",
+						Container: src.Container,
+						Bitrate:   src.Bitrate,
+					}
+					if err := tx.Create(source).Error; err != nil {
+						return err
+					}
+				}
+			}
+		}
 	}
 
 	return nil
