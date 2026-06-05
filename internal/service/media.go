@@ -47,6 +47,15 @@ func (s *MediaService) GetItems(parentID *string, recursive bool, itemTypes []st
 	if sortOrder == "" {
 		sortOrder = "asc"
 	}
+	// 转换 Emby 格式的 sortOrder 为 SQL 格式
+	if strings.EqualFold(sortOrder, "Ascending") {
+		sortOrder = "asc"
+	} else if strings.EqualFold(sortOrder, "Descending") {
+		sortOrder = "desc"
+	} else if sortOrder != "asc" && sortOrder != "desc" {
+		sortOrder = "asc" // 默认值
+	}
+
 	if sortBy != "" {
 		query = query.Order(fmt.Sprintf("%s %s", sortBy, sortOrder))
 	}
@@ -108,6 +117,11 @@ func (s *MediaService) GetItemsByLibrary(libraryID string, limit, startIndex int
 
 // ItemToDTO 转换媒体项目为 DTO
 func (s *MediaService) ItemToDTO(item *database.MediaItem, userID string, includeFields []string) *types.BaseItemDto {
+	parentIDStr := ""
+	if item.ParentID != nil {
+		parentIDStr = *item.ParentID
+	}
+
 	dto := &types.BaseItemDto{
 		ID:            item.ID,
 		Name:          item.Name,
@@ -121,7 +135,7 @@ func (s *MediaService) ItemToDTO(item *database.MediaItem, userID string, includ
 		ProductionYear: item.Year,
 		CommunityRating: item.CommunityRating,
 		OfficialRating: item.OfficialRating,
-		ParentID:      *item.ParentID,
+		ParentID:      parentIDStr,
 		IndexNumber:   item.EpisodeNumber,
 		ParentIndexNumber: item.SeasonNumber,
 		SeriesID:      "",
