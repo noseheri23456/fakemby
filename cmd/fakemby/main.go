@@ -51,6 +51,8 @@ func main() {
 	emby.RegisterSystemRoutes(router, cfg)
 	emby.RegisterAuthRoutes(router, cfg)
 	emby.RegisterUserRoutes(router)
+	emby.RegisterItemRoutes(router)
+	emby.RegisterAdminItemRoutes(router)
 
 	// 创建服务器
 	server := &http.Server{
