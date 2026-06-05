@@ -63,6 +63,7 @@ func main() {
 	emby.RegisterSessionRoutes(router)
 	emby.RegisterUserDataRoutes(router)
 	emby.RegisterImageRoutes(router, cfg)
+	emby.RegisterSearchRoutes(router)
 
 	// 创建服务器
 	server := &http.Server{

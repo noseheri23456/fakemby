@@ -134,3 +134,13 @@ type ViewsResponse struct {
 	Items            []BaseItemDto `json:"Items"`
 	TotalRecordCount int           `json:"TotalRecordCount"`
 }
+
+// SearchHintDto 搜索提示项
+type SearchHintDto struct {
+	Name              string `json:"Name"`
+	IndexNumber       *int   `json:"IndexNumber,omitempty"`
+	ParentIndexNumber *int   `json:"ParentIndexNumber,omitempty"`
+	Id                string `json:"Id"`
+	Type              string `json:"Type"`
+	PrimaryImageTag   string `json:"PrimaryImageTag,omitempty"`
+}
