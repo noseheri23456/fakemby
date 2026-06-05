@@ -1,0 +1,48 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Build artifacts
+fakemby
+fakemby.exe
+dist/
+build/
+
+# Data
+data/
+logs/
+*.db
+*.db-journal
+cache/
+
+# Test coverage
+*.out
+*.test
+
+# Dependencies
+vendor/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Documentation
+*.md
+docs/
+
+# Docker files themselves
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# Test scripts
+test*.sh

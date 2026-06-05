@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  fakemby:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: fakemby
+
+    # 端口映射
+    ports:
+      - "8096:8096"
+
+    # 卷挂载（数据持久化）
+    volumes:
+      # 数据库存储
+      - ./data/db:/app/data
+      # 图片缓存
+      - ./data/cache:/app/data/cache
+      # 日志
+      - ./logs:/app/logs
+      # 配置文件（可选：覆盖默认配置）
+      - ./config.yaml:/app/config.yaml:ro
+
+    # 环境变量（可覆盖配置文件中的值）
+    environment:
+      # 日志级别
+      LOG_LEVEL: "info"
+
+      # 数据库配置
+      DATABASE_PATH: "/app/data/fakemby.db"
+      DATABASE_WAL_MODE: "true"
+
+      # 服务器配置
+      SERVER_HOST: "0.0.0.0"
+      SERVER_PORT: "8096"
+      SERVER_NAME: "FakEmby Server"
+      SERVER_VERSION: "4.8.0.0"
+
+      # 认证配置
+      AUTH_TOKEN_EXPIRY_DAYS: "30"
+
+      # 图片配置
+      IMAGE_MODE: "redirect"          # redirect 或 proxy_cache
+      IMAGE_CACHE_DIR: "/app/data/cache/images"
+      IMAGE_CDN_PREFIX: ""
+
+      # 播放配置
+      PLAYBACK_REDIRECT: "true"
+      PLAYBACK_SIGN_KEY: "change-me-in-production"
+      PLAYBACK_SIGN_TTL: "3600"
+
+      # 管理员配置
+      ADMIN_API_KEY: "change-me"
+
+      # TMDb 配置（可选）
+      TMDB_API_KEY: ""
+      TMDB_LANGUAGE: "zh-CN"
+      TMDB_IMAGE_BASE: "https://image.tmdb.org/t/p/original"
+
+    # 重启策略
+    restart: unless-stopped
+
+    # 资源限制（可选）
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2'
+    #       memory: 512M
+    #     reservations:
+    #       cpus: '1'
+    #       memory: 256M
+
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8096/emby/System/Info/Public"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
