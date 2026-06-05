@@ -38,6 +38,9 @@ func main() {
 	// 启动 Token 过期清理
 	database.StartTokenCleanupRoutine(cfg.Auth.TokenExpiryDays)
 
+	// 启动播放进度缓冲系统（30 秒 flush）
+	emby.InitProgressBuffer(database.Get(), 30*time.Second)
+
 	// 创建 Gin 引擎
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -56,6 +59,9 @@ func main() {
 	emby.RegisterAdminItemRoutes(router)
 	emby.RegisterImportRoutes(router)
 	emby.RegisterAdminUserRoutes(router)
+	emby.RegisterPlaybackRoutes(router)
+	emby.RegisterSessionRoutes(router)
+	emby.RegisterUserDataRoutes(router)
 
 	// 创建服务器
 	server := &http.Server{
@@ -84,6 +90,9 @@ func main() {
 
 	sig := <-sigChan
 	logger.Info("收到关闭信号", "signal", sig)
+
+	// 关闭进度缓冲系统（flush 所有剩余数据）
+	emby.ShutdownProgressBuffer()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
