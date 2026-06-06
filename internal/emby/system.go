@@ -28,10 +28,13 @@ type SystemInfo struct {
 // RegisterSystemRoutes 注册系统路由
 func RegisterSystemRoutes(router *gin.Engine, cfg *config.Config) {
 	// 公开端点（无需认证）
-	router.GET("/emby/System/Info/Public", getSystemInfoPublic(cfg))
+	publicHandler := getSystemInfoPublic(cfg)
+	router.GET("/emby/System/Info/Public", publicHandler)
+	router.GET("/emby/system/info/public", publicHandler) // 小写版本（官方 Emby 客户端使用）
 
 	// 认证端点（需要认证）
 	router.GET("/emby/System/Info", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), getSystemInfo(cfg))
+	router.GET("/emby/system/info", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), getSystemInfo(cfg)) // 小写版本
 }
 
 func getSystemInfoPublic(cfg *config.Config) gin.HandlerFunc {

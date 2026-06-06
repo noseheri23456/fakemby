@@ -2,6 +2,7 @@ package emby
 
 import (
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -62,6 +63,37 @@ func CORSMiddleware() gin.HandlerFunc {
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
 			return
+		}
+
+		c.Next()
+	}
+}
+
+// CaseInsensitiveRouteMiddleware 处理 Emby API 的大小写问题
+// 官方 Emby 客户端使用小写路径（/emby/system/info/public）
+// 但我们的路由是大小写混合的（/emby/System/Info/Public）
+func CaseInsensitiveRouteMiddleware() gin.HandlerFunc {
+	// 大小写映射表：小写路径 -> 正确的大小写路径
+	pathMapping := map[string]string{
+		"/emby/system/info/public":           "/emby/System/Info/Public",
+		"/emby/system/info":                  "/emby/System/Info",
+		"/emby/users/public":                 "/emby/Users/Public",
+		"/emby/users/authenticatebyname":     "/emby/Users/AuthenticateByName",
+		"/emby/users/current":                "/emby/Users/Current",
+		"/emby/sessions/logout":              "/emby/Sessions/Logout",
+	}
+
+	return func(c *gin.Context) {
+		path := c.Request.URL.Path
+		pathLower := strings.ToLower(path)
+
+		// 检查是否需要转换
+		if correctPath, exists := pathMapping[pathLower]; exists && path != correctPath {
+			slog.Debug("Case-insensitive route redirect",
+				"from", path,
+				"to", correctPath,
+			)
+			c.Request.URL.Path = correctPath
 		}
 
 		c.Next()

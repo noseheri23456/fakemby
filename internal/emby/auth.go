@@ -1,6 +1,7 @@
 package emby
 
 import (
+	"encoding/base64"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -34,9 +35,29 @@ type UserDTO struct {
 func RegisterAuthRoutes(router *gin.Engine, cfg *config.Config) {
 	authSvc := service.NewAuthService(database.Get())
 
+	// 认证端点（PascalCase）
 	router.POST("/emby/Users/AuthenticateByName", authenticateByName(authSvc, cfg))
 	router.GET("/emby/Users/Public", getUsersPublic())
+	router.GET("/emby/Users/Current", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), getCurrentUser(authSvc))
 	router.POST("/emby/Sessions/Logout", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), logout(authSvc))
+
+	// 认证端点（小写版本，兼容官方 Emby 客户端）
+	router.POST("/emby/users/authenticatebyname", authenticateByName(authSvc, cfg))
+	router.GET("/emby/users/public", getUsersPublic())
+	router.GET("/emby/users/current", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), getCurrentUser(authSvc))
+	router.POST("/emby/sessions/logout", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), logout(authSvc))
+
+	// 调试端点
+	router.GET("/debug/auth", func(c *gin.Context) {
+		token := getTokenFromRequest(c)
+		authHeader := c.GetHeader("Authorization")
+		c.JSON(http.StatusOK, gin.H{
+			"token": token,
+			"auth_header": authHeader,
+			"x_emby_token": c.GetHeader("X-Emby-Token"),
+			"api_key": c.Query("api_key"),
+		})
+	})
 }
 
 func authenticateByName(authSvc *service.AuthService, cfg *config.Config) gin.HandlerFunc {
@@ -94,15 +115,36 @@ func getUsersPublic() gin.HandlerFunc {
 		userDTOs := make([]UserDTO, 0, len(users))
 		for _, u := range users {
 			userDTOs = append(userDTOs, UserDTO{
-				ID:      u.ID,
-				Name:    u.Name,
-				IsAdmin: u.IsAdmin,
+				ID:          u.ID,
+				Name:        u.Name,
+				HasPassword: u.PasswordHash != "", // 如果有密码哈希，则需要密码认证
+				IsAdmin:     u.IsAdmin,
 			})
 		}
 
 		c.JSON(http.StatusOK, gin.H{
 			"Users": userDTOs,
 		})
+	}
+}
+
+func getCurrentUser(authSvc *service.AuthService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID := c.GetString("user_id")
+		user, err := authSvc.GetUserByID(userID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, ErrNotFound)
+			return
+		}
+
+		resp := UserDTO{
+			ID:          user.ID,
+			Name:        user.Name,
+			HasPassword: true,
+			IsAdmin:     user.IsAdmin,
+		}
+
+		c.JSON(http.StatusOK, resp)
 	}
 }
 
@@ -131,17 +173,53 @@ func AuthTokenMiddleware(expiryDays int) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := getTokenFromRequest(c)
 		if token == "" {
-			c.JSON(http.StatusUnauthorized, ErrUnauthorized)
+			// 🔍 详细的日志记录，用于诊断
+			debugHeaders := make(map[string]string)
+			for key := range c.Request.Header {
+				debugHeaders[key] = c.Request.Header.Get(key)
+			}
+
+			slog.Warn("🔴 认证失败 - 请求详情",
+				"method", c.Request.Method,
+				"path", c.Request.URL.Path,
+				"query", c.Request.URL.RawQuery,
+				"remote_addr", c.RemoteIP(),
+				"user_agent", c.GetHeader("User-Agent"),
+				"headers", debugHeaders,
+			)
+
+			// 返回标准 Emby 401 响应，包含认证信息
+			c.Header("WWW-Authenticate", "Emby")
+			c.Header("X-Emby-Auth-Redirect", "/emby/Users/AuthenticateByName")
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"StatusCode":           http.StatusUnauthorized,
+				"Message":              "Unauthorized",
+				"ErrorCode":            "Unauthorized",
+				"AuthenticationUrl":    "/emby/Users/AuthenticateByName",
+			})
 			c.Abort()
 			return
 		}
 
+		slog.Debug("验证 Token", "token", token[:16]+"...", "path", c.Request.URL.Path)
+
 		t, err := authSvc.VerifyToken(token, expiryDays)
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, ErrInvalidToken)
+			slog.Warn("Token 验证失败", "token", token[:16]+"...", "error", err.Error(), "path", c.Request.URL.Path)
+			c.Header("WWW-Authenticate", "Emby")
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"StatusCode": http.StatusUnauthorized,
+				"Message":    "Invalid or expired token",
+			})
 			c.Abort()
 			return
 		}
+
+		slog.Info("✅ Token 验证成功",
+			"userId", t.UserID,
+			"path", c.Request.URL.Path,
+			"method", c.Request.Method,
+		)
 
 		// 将用户信息存储在上下文中
 		c.Set("user_id", t.UserID)
@@ -155,14 +233,133 @@ func AuthTokenMiddleware(expiryDays int) gin.HandlerFunc {
 // 辅助函数
 
 func getTokenFromRequest(c *gin.Context) string {
-	// 1. 从 X-Emby-Token Header 获取
+	// 优先级 0: X-Emby-Authorization Header（RodelPlayer 使用此方式）
+	// 格式: X-Emby-Authorization: Emby UserId="...", Client="...", Token="..."
+	if xembyAuth := c.GetHeader("X-Emby-Authorization"); xembyAuth != "" {
+		slog.Debug("检测到 X-Emby-Authorization Header")
+		// 从 X-Emby-Authorization 中提取 Token 参数
+		token := extractTokenFromEmbyAuth(xembyAuth)
+		if token != "" {
+			slog.Info("✓ 从 X-Emby-Authorization Header 提取 Token", "token_prefix", token[:min(16, len(token))]+"...")
+			return token
+		}
+	}
+
+	// 优先级 1: X-Emby-Token Header（官方实现）
 	if token := c.GetHeader("X-Emby-Token"); token != "" {
+		slog.Debug("从 X-Emby-Token Header 获取 Token")
 		return token
 	}
 
-	// 2. 从 ?api_key= 查询参数获取
+	// 优先级 2: Authorization Header
+	authHeader := c.GetHeader("Authorization")
+	if authHeader != "" {
+		// 支持多种格式：
+		// - "Bearer {token}"（标准 Bearer 格式）
+		// - "Token {token}"
+		// - "Basic {base64(username:password)}"（HTTP Basic Auth - RodelPlayer 可能使用）
+
+		for _, prefix := range []string{"Bearer ", "Token "} {
+			if strings.HasPrefix(authHeader, prefix) {
+				token := strings.TrimPrefix(authHeader, prefix)
+				slog.Debug("从 Authorization Header 获取 Token", "scheme", strings.TrimSuffix(prefix, " "))
+				return token
+			}
+		}
+
+		// 支持 HTTP Basic Auth：Authorization: Basic base64(username:password)
+		if strings.HasPrefix(authHeader, "Basic ") {
+			basicAuth := strings.TrimPrefix(authHeader, "Basic ")
+			slog.Debug("检测到 Basic Auth 请求", "base64", basicAuth[:min(20, len(basicAuth))]+"...")
+
+			decoded, err := base64.StdEncoding.DecodeString(basicAuth)
+			if err != nil {
+				slog.Warn("Basic Auth Base64 解码失败", "error", err)
+				return ""
+			}
+
+			parts := strings.SplitN(string(decoded), ":", 2)
+			if len(parts) == 2 {
+				username, password := parts[0], parts[1]
+				slog.Info("✓ 检测到 HTTP Basic Auth", "username", username)
+
+				// 尝试用用户名和密码进行认证
+				authSvc := service.NewAuthService(database.Get())
+				user, err := authSvc.VerifyPassword(username, password)
+				if err != nil {
+					slog.Warn("✗ HTTP Basic Auth 密码验证失败", "username", username, "error", err.Error())
+					return ""
+				}
+
+				// 生成 Token
+				token, err := authSvc.GenerateToken(user.ID, "", "BasicAuth", "RodelPlayer", "1.0")
+				if err != nil {
+					slog.Error("✗ HTTP Basic Auth 令牌生成失败", "error", err)
+					return ""
+				}
+
+				slog.Info("✅ HTTP Basic Auth 成功，已生成 Token", "username", username, "token_prefix", token[:16]+"...")
+				return token
+			} else {
+				slog.Warn("✗ Basic Auth 格式错误", "parts_count", len(parts))
+			}
+		}
+
+		// Emby 格式（通常用于登录请求）
+		if strings.HasPrefix(authHeader, "Emby ") {
+			slog.Debug("识别到 Emby 格式的 Authorization Header")
+		}
+	}
+
+	// 优先级 3: 查询参数（某些客户端使用）
 	if token := c.Query("api_key"); token != "" {
+		slog.Debug("从查询参数 api_key 获取 Token")
 		return token
+	}
+
+	if token := c.Query("X-Emby-Token"); token != "" {
+		slog.Debug("从查询参数 X-Emby-Token 获取 Token")
+		return token
+	}
+
+	// 日志：未找到 Token
+	debugInfo := gin.H{
+		"path":     c.Request.URL.Path,
+		"method":   c.Request.Method,
+		"auth_header": authHeader,
+		"query":      c.Request.URL.RawQuery,
+	}
+	slog.Warn("未找到认证 Token", "debug", debugInfo)
+	return ""
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// extractTokenFromEmbyAuth 从 X-Emby-Authorization Header 中提取 Token
+// 格式: Emby UserId="...", Client="...", Token="..."
+func extractTokenFromEmbyAuth(xembyAuth string) string {
+	if !strings.HasPrefix(xembyAuth, "Emby ") {
+		return ""
+	}
+
+	parts := strings.Split(xembyAuth[5:], ", ")
+	for _, part := range parts {
+		kv := strings.SplitN(part, "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+
+		key := strings.TrimSpace(kv[0])
+		value := strings.Trim(strings.TrimSpace(kv[1]), "\"")
+
+		if key == "Token" {
+			return value
+		}
 	}
 
 	return ""

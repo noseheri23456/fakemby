@@ -162,11 +162,32 @@ func (s *MediaService) ItemToDTO(item *database.MediaItem, userID string, includ
 		ProviderIds:   make(map[string]string),
 	}
 
-	// 解析 JSON 字段
+	// 解析 JSON 字段 - 转换为 NameIdPair 对象
 	if item.Genres != "" {
 		var genres []string
 		if err := json.Unmarshal([]byte(item.Genres), &genres); err == nil {
-			dto.Genres = genres
+			genreItems := make([]types.NameIdPair, 0, len(genres))
+			for _, g := range genres {
+				genreItems = append(genreItems, types.NameIdPair{
+					Name: g,
+					ID:   "",
+				})
+			}
+			dto.GenreItems = genreItems
+		}
+	}
+
+	if item.Studios != "" {
+		var studios []string
+		if err := json.Unmarshal([]byte(item.Studios), &studios); err == nil {
+			studioItems := make([]types.NameIdPair, 0, len(studios))
+			for _, s := range studios {
+				studioItems = append(studioItems, types.NameIdPair{
+					Name: s,
+					ID:   "",
+				})
+			}
+			dto.Studios = studioItems
 		}
 	}
 
@@ -188,6 +209,12 @@ func (s *MediaService) ItemToDTO(item *database.MediaItem, userID string, includ
 		dto.ProviderIds["Tvdb"] = item.TVDBID
 	}
 
+	// 计算子项数和季数
+	s.enrichItemCounts(dto, item.ID)
+
+	// 设置 SeriesId（对于 Season 和 Episode）
+	s.enrichSeriesId(dto, item)
+
 	// 获取用户数据（已看、收藏、进度）
 	if userID != "" {
 		s.enrichUserData(dto, item.ID, userID)
@@ -196,8 +223,8 @@ func (s *MediaService) ItemToDTO(item *database.MediaItem, userID string, includ
 	// 获取图片
 	s.enrichImages(dto, item.ID)
 
-	// 获取媒体源（仅当 Fields 包含或需要时）
-	if shouldIncludeField(includeFields, "MediaSources") {
+	// 获取媒体源（始终包含，除非明确指定 Fields）
+	if len(includeFields) == 0 || shouldIncludeField(includeFields, "MediaSources") || shouldIncludeField(includeFields, "*") {
 		s.enrichMediaSources(dto, item.ID)
 	}
 
@@ -353,4 +380,66 @@ func (s *MediaService) GetEpisodesBySeriesID(seriesID string) ([]database.MediaI
 	}
 
 	return episodes, total, nil
+}
+
+// enrichItemCounts 填充 ChildCount 和 SeasonCount
+func (s *MediaService) enrichItemCounts(dto *types.BaseItemDto, itemID string) {
+	switch dto.Type {
+	case "Series":
+		// 统计 Series 的 Season 数量
+		var seasonCount int64
+		s.db.Where("parent_id = ? AND type = ?", itemID, "Season").
+			Model(&database.MediaItem{}).Count(&seasonCount)
+		if seasonCount > 0 {
+			count := int(seasonCount)
+			dto.SeasonCount = &count
+		}
+
+	case "Folder", "CollectionFolder":
+		// 统计 Folder 的子项数量
+		var childCount int64
+		s.db.Where("parent_id = ?", itemID).
+			Model(&database.MediaItem{}).Count(&childCount)
+		if childCount > 0 {
+			count := int(childCount)
+			dto.ChildCount = &count
+		}
+
+	case "Season":
+		// 统计 Season 的 Episode 数量
+		var episodeCount int64
+		s.db.Where("parent_id = ? AND type = ?", itemID, "Episode").
+			Model(&database.MediaItem{}).Count(&episodeCount)
+		if episodeCount > 0 {
+			count := int(episodeCount)
+			dto.ChildCount = &count
+		}
+	}
+}
+
+// enrichSeriesId 为 Season 和 Episode 填充 SeriesId
+func (s *MediaService) enrichSeriesId(dto *types.BaseItemDto, item *database.MediaItem) {
+	if dto.Type == "Season" && item.ParentID != nil {
+		// Season 的 Series ID 就是其 ParentID
+		dto.SeriesID = *item.ParentID
+		// 查询 Series 的名称
+		var series database.MediaItem
+		if err := s.db.Where("id = ?", *item.ParentID).First(&series).Error; err == nil {
+			dto.SeriesName = series.Name
+		}
+
+	} else if dto.Type == "Episode" && item.ParentID != nil {
+		// Episode 需要找到其 Season 的 ParentID（即 Series）
+		var season database.MediaItem
+		if err := s.db.Where("id = ?", *item.ParentID).First(&season).Error; err == nil {
+			if season.ParentID != nil {
+				dto.SeriesID = *season.ParentID
+				// 查询 Series 的名称
+				var series database.MediaItem
+				if err := s.db.Where("id = ?", *season.ParentID).First(&series).Error; err == nil {
+					dto.SeriesName = series.Name
+				}
+			}
+		}
+	}
 }

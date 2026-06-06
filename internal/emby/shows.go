@@ -12,11 +12,17 @@ import (
 func RegisterShowRoutes(router *gin.Engine) {
 	mediaSvc := service.NewMediaService(database.Get())
 
+	seasonsHandler := getSeasons(mediaSvc)
+	episodesHandler := getEpisodes(mediaSvc)
+	authMiddleware := AuthTokenMiddleware(30)
+
 	// 获取剧集的季列表
-	router.GET("/emby/Shows/:seriesId/Seasons", AuthTokenMiddleware(30), getSeasons(mediaSvc))
+	router.GET("/emby/Shows/:seriesId/Seasons", authMiddleware, seasonsHandler)
+	router.GET("/emby/shows/:seriesId/seasons", authMiddleware, seasonsHandler) // 小写版本
 
 	// 获取季的集列表
-	router.GET("/emby/Shows/:seriesId/Episodes", AuthTokenMiddleware(30), getEpisodes(mediaSvc))
+	router.GET("/emby/Shows/:seriesId/Episodes", authMiddleware, episodesHandler)
+	router.GET("/emby/shows/:seriesId/episodes", authMiddleware, episodesHandler) // 小写版本
 }
 
 func getSeasons(mediaSvc *service.MediaService) gin.HandlerFunc {

@@ -47,6 +47,7 @@ func main() {
 
 	// 注册中间件
 	router.Use(emby.CORSMiddleware())
+	router.Use(emby.CaseInsensitiveRouteMiddleware())
 	router.Use(emby.RequestLogMiddleware())
 	router.Use(emby.ErrorHandlerMiddleware())
 

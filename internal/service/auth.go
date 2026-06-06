@@ -59,14 +59,19 @@ func (s *AuthService) VerifyToken(token string, expiryDays int) (*database.Token
 	var t database.Token
 	if err := s.db.Where("token = ?", token).First(&t).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
+			slog.Error("Token 未找到", "token_prefix", token[:16]+"...")
 			return nil, ErrInvalidToken
 		}
+		slog.Error("查询 Token 失败", "error", err)
 		return nil, err
 	}
+
+	slog.Debug("找到 Token", "userID", t.UserID, "createdAt", t.CreatedAt)
 
 	// 检查令牌是否过期
 	cutoffTime := time.Now().AddDate(0, 0, -expiryDays)
 	if t.CreatedAt.Before(cutoffTime) {
+		slog.Warn("Token 已过期", "token_prefix", token[:16]+"...", "createdAt", t.CreatedAt, "cutoffTime", cutoffTime)
 		// 删除过期令牌
 		s.db.Delete(&t)
 		return nil, ErrTokenExpired

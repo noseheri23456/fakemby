@@ -1,6 +1,8 @@
 package emby
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -317,12 +319,13 @@ func importItem(tx *gorm.DB, libraryID string, item ImportItem, parentID *string
 }
 
 func generateImageTag(url string) string {
-	// 简化：取 URL 的 MD5 前8位
-	// 完整实现应该用 crypto/md5
-	if len(url) > 8 {
-		return url[len(url)-8:]
+	// MD5 哈希 URL 并取前 8 个十六进制字符
+	hash := md5.Sum([]byte(url))
+	hashStr := hex.EncodeToString(hash[:])
+	if len(hashStr) >= 8 {
+		return hashStr[:8]
 	}
-	return url
+	return hashStr
 }
 
 // adminAuth 管理接口认证中间件
