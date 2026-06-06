@@ -17,6 +17,7 @@ func RegisterItemRoutes(router *gin.Engine) {
 	mediaSvc := service.NewMediaService(database.Get())
 
 	viewsHandler := getViews(mediaSvc)
+	foldersHandler := getFolders(mediaSvc)
 	itemsHandler := getItems(mediaSvc)
 	itemHandler := getItem(mediaSvc)
 	latestHandler := getLatest(mediaSvc)
@@ -26,6 +27,10 @@ func RegisterItemRoutes(router *gin.Engine) {
 	// 媒体库视图
 	router.GET("/emby/Users/:userId/Views", authMiddleware, viewsHandler)
 	router.GET("/emby/users/:userId/views", authMiddleware, viewsHandler) // 小写版本
+
+	// 媒体库文件夹（浏览文件夹层级）
+	router.GET("/emby/Users/:userId/Folders", authMiddleware, foldersHandler)
+	router.GET("/emby/users/:userId/folders", authMiddleware, foldersHandler) // 小写版本
 
 	// 媒体列表
 	router.GET("/emby/Users/:userId/Items", authMiddleware, itemsHandler)
@@ -84,6 +89,54 @@ func getViews(mediaSvc *service.MediaService) gin.HandlerFunc {
 	}
 }
 
+func getFolders(mediaSvc *service.MediaService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID := c.GetString("user_id")
+		if userID == "" {
+			c.JSON(http.StatusUnauthorized, ErrUnauthorized)
+			return
+		}
+
+		// Folders 端点返回用户可以访问的所有媒体库
+		// 功能上与 Views 相同，但符合 Emby API 规范
+		libraries, err := mediaSvc.GetLibraries()
+		if err != nil {
+			slog.Error("获取媒体文件夹失败", "error", err)
+			c.JSON(http.StatusInternalServerError, ErrInternal)
+			return
+		}
+
+		// 转换为文件夹 DTO
+		items := make([]types.BaseItemDto, 0, len(libraries))
+		for _, lib := range libraries {
+			// 查询这个库中的顶级项目数（子项数）
+			var childCount int64
+			database.Get().Where("library_id = ? AND parent_id IS NULL", lib.ID).
+				Model(&database.MediaItem{}).Count(&childCount)
+
+			childCountInt := int(childCount)
+			dto := types.BaseItemDto{
+				ID:             lib.ID,
+				Name:           lib.Name,
+				Type:           "Folder",
+				IsFolder:       true,
+				MediaType:      "Folder",
+				ChildCount:     &childCountInt,
+				CollectionType: lib.Type,
+			}
+			items = append(items, dto)
+		}
+
+		resp := types.ItemsResponse{
+			Items:            items,
+			TotalRecordCount: len(items),
+			StartIndex:       0,
+		}
+
+		c.JSON(http.StatusOK, resp)
+	}
+}
+
 func getItems(mediaSvc *service.MediaService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.GetString("user_id")
@@ -127,10 +180,11 @@ func getItems(mediaSvc *service.MediaService) gin.HandlerFunc {
 			return
 		}
 
-		// 转换为 DTO
+		// 转换为 DTO，尊重 Fields 参数
 		fields := service.ParseFields(fieldsStr)
 		dtos := make([]types.BaseItemDto, 0, len(items))
 		for _, item := range items {
+			// 为列表项传递 Fields 以优化响应大小
 			dto := mediaSvc.ItemToDTO(&item, userID, fields)
 			dtos = append(dtos, *dto)
 		}

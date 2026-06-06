@@ -155,6 +155,19 @@ func (s *MediaService) GetItemsByLibrary(libraryID string, limit, startIndex int
 	return items, total, nil
 }
 
+// shouldIncludeAllFields 检查是否应该包含所有字段
+func shouldIncludeAllFields(includeFields []string) bool {
+	if len(includeFields) == 0 {
+		return true // 默认包含所有字段
+	}
+	for _, f := range includeFields {
+		if f == "*" {
+			return true
+		}
+	}
+	return false
+}
+
 // ItemToDTO 转换媒体项目为 DTO
 func (s *MediaService) ItemToDTO(item *database.MediaItem, userID string, includeFields []string) *types.BaseItemDto {
 	parentIDStr := ""
@@ -162,33 +175,69 @@ func (s *MediaService) ItemToDTO(item *database.MediaItem, userID string, includ
 		parentIDStr = *item.ParentID
 	}
 
+	// 简化的 DTO，只包含必需字段
 	dto := &types.BaseItemDto{
-		ID:            item.ID,
-		Name:          item.Name,
-		Type:          item.Type,
-		IsFolder:      item.Type == "Series" || item.Type == "Season" || item.Type == "Folder",
-		MediaType:     "Video",
-		Overview:      item.Overview,
-		SortName:      item.SortName,
-		RunTimeTicks:  item.RuntimeTicks,
-		PremiereDate:  item.PremiereDate,
-		ProductionYear: item.Year,
-		CommunityRating: item.CommunityRating,
-		OfficialRating: item.OfficialRating,
-		ParentID:      parentIDStr,
-		IndexNumber:   item.EpisodeNumber,
-		ParentIndexNumber: item.SeasonNumber,
-		SeriesID:      "",
-		ChildCount:    nil,
-		SeasonCount:   nil,
-		DateCreated:   item.DateCreated.Format(time.RFC3339),
-		ImageTags:     make(map[string]string),
-		UserData:      &types.UserItemDataDto{},
-		ProviderIds:   make(map[string]string),
+		ID:       item.ID,
+		Name:     item.Name,
+		Type:     item.Type,
+		IsFolder: item.Type == "Series" || item.Type == "Season" || item.Type == "Folder",
+	}
+
+	// 如果未指定 Fields 或指定了 "*"，包含所有字段
+	includeAll := shouldIncludeAllFields(includeFields)
+
+	if includeAll || shouldIncludeField(includeFields, "MediaType") {
+		dto.MediaType = "Video"
+	}
+	if includeAll || shouldIncludeField(includeFields, "Overview") {
+		dto.Overview = item.Overview
+	}
+	if includeAll || shouldIncludeField(includeFields, "SortName") {
+		dto.SortName = item.SortName
+	}
+	if includeAll || shouldIncludeField(includeFields, "RunTimeTicks") {
+		dto.RunTimeTicks = item.RuntimeTicks
+	}
+	if includeAll || shouldIncludeField(includeFields, "PremiereDate") {
+		dto.PremiereDate = item.PremiereDate
+	}
+	if includeAll || shouldIncludeField(includeFields, "ProductionYear") {
+		dto.ProductionYear = item.Year
+	}
+	if includeAll || shouldIncludeField(includeFields, "CommunityRating") {
+		dto.CommunityRating = item.CommunityRating
+	}
+	if includeAll || shouldIncludeField(includeFields, "OfficialRating") {
+		dto.OfficialRating = item.OfficialRating
+	}
+	if includeAll || shouldIncludeField(includeFields, "ParentId") {
+		dto.ParentID = parentIDStr
+	}
+	if includeAll || shouldIncludeField(includeFields, "IndexNumber") {
+		dto.IndexNumber = item.EpisodeNumber
+	}
+	if includeAll || shouldIncludeField(includeFields, "ParentIndexNumber") {
+		dto.ParentIndexNumber = item.SeasonNumber
+	}
+	if includeAll || shouldIncludeField(includeFields, "DateCreated") {
+		dto.DateCreated = item.DateCreated.Format(time.RFC3339)
+	}
+	if includeAll || shouldIncludeField(includeFields, "ImageTags") {
+		dto.ImageTags = make(map[string]string)
+	} else {
+		dto.ImageTags = nil
+	}
+	if includeAll || shouldIncludeField(includeFields, "UserData") {
+		dto.UserData = &types.UserItemDataDto{}
+	}
+	if includeAll || shouldIncludeField(includeFields, "ProviderIds") {
+		dto.ProviderIds = make(map[string]string)
+	} else {
+		dto.ProviderIds = nil
 	}
 
 	// 解析 JSON 字段 - 转换为 NameIdPair 对象
-	if item.Genres != "" {
+	if (includeAll || shouldIncludeField(includeFields, "GenreItems") || shouldIncludeField(includeFields, "Genres")) && item.Genres != "" {
 		var genres []string
 		if err := json.Unmarshal([]byte(item.Genres), &genres); err == nil {
 			genreItems := make([]types.NameIdPair, 0, len(genres))
@@ -202,7 +251,7 @@ func (s *MediaService) ItemToDTO(item *database.MediaItem, userID string, includ
 		}
 	}
 
-	if item.Studios != "" {
+	if (includeAll || shouldIncludeField(includeFields, "Studios")) && item.Studios != "" {
 		var studios []string
 		if err := json.Unmarshal([]byte(item.Studios), &studios); err == nil {
 			studioItems := make([]types.NameIdPair, 0, len(studios))
@@ -216,7 +265,7 @@ func (s *MediaService) ItemToDTO(item *database.MediaItem, userID string, includ
 		}
 	}
 
-	if item.Tags != "" {
+	if (includeAll || shouldIncludeField(includeFields, "Tags")) && item.Tags != "" {
 		var tags []string
 		if err := json.Unmarshal([]byte(item.Tags), &tags); err == nil {
 			dto.Tags = tags
@@ -224,7 +273,7 @@ func (s *MediaService) ItemToDTO(item *database.MediaItem, userID string, includ
 	}
 
 	// 解析 People 数据
-	if item.People != "" {
+	if (includeAll || shouldIncludeField(includeFields, "People")) && item.People != "" {
 		var people []types.PersonInfo
 		if err := json.Unmarshal([]byte(item.People), &people); err == nil {
 			dto.People = people
@@ -232,32 +281,40 @@ func (s *MediaService) ItemToDTO(item *database.MediaItem, userID string, includ
 	}
 
 	// 设置 Provider IDs
-	if item.TMDBID != "" {
-		dto.ProviderIds["Tmdb"] = item.TMDBID
-	}
-	if item.IMDBID != "" {
-		dto.ProviderIds["Imdb"] = item.IMDBID
-	}
-	if item.TVDBID != "" {
-		dto.ProviderIds["Tvdb"] = item.TVDBID
+	if includeAll || shouldIncludeField(includeFields, "ProviderIds") {
+		if item.TMDBID != "" {
+			dto.ProviderIds["Tmdb"] = item.TMDBID
+		}
+		if item.IMDBID != "" {
+			dto.ProviderIds["Imdb"] = item.IMDBID
+		}
+		if item.TVDBID != "" {
+			dto.ProviderIds["Tvdb"] = item.TVDBID
+		}
 	}
 
 	// 计算子项数和季数
-	s.enrichItemCounts(dto, item.ID)
+	if includeAll || shouldIncludeField(includeFields, "ChildCount") || shouldIncludeField(includeFields, "SeasonCount") {
+		s.enrichItemCounts(dto, item.ID)
+	}
 
 	// 设置 SeriesId（对于 Season 和 Episode）
-	s.enrichSeriesId(dto, item)
+	if includeAll || shouldIncludeField(includeFields, "SeriesId") || shouldIncludeField(includeFields, "SeriesName") {
+		s.enrichSeriesId(dto, item)
+	}
 
 	// 获取用户数据（已看、收藏、进度）
-	if userID != "" {
+	if userID != "" && (includeAll || shouldIncludeField(includeFields, "UserData")) {
 		s.enrichUserData(dto, item.ID, userID)
 	}
 
 	// 获取图片
-	s.enrichImages(dto, item.ID)
+	if includeAll || shouldIncludeField(includeFields, "ImageTags") || shouldIncludeField(includeFields, "BackdropImageTags") {
+		s.enrichImages(dto, item.ID)
+	}
 
-	// 获取媒体源（始终包含，除非明确指定 Fields）
-	if len(includeFields) == 0 || shouldIncludeField(includeFields, "MediaSources") || shouldIncludeField(includeFields, "*") {
+	// 获取媒体源
+	if includeAll || shouldIncludeField(includeFields, "MediaSources") {
 		s.enrichMediaSources(dto, item.ID)
 	}
 
