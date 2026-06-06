@@ -223,6 +223,14 @@ func (s *MediaService) ItemToDTO(item *database.MediaItem, userID string, includ
 		}
 	}
 
+	// 解析 People 数据
+	if item.People != "" {
+		var people []types.PersonInfo
+		if err := json.Unmarshal([]byte(item.People), &people); err == nil {
+			dto.People = people
+		}
+	}
+
 	// 设置 Provider IDs
 	if item.TMDBID != "" {
 		dto.ProviderIds["Tmdb"] = item.TMDBID

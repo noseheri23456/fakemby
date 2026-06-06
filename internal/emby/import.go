@@ -28,6 +28,7 @@ type ImportItem struct {
 	Genres          []string               `json:"genres"`
 	Studios         []string               `json:"studios"`
 	Tags            []string               `json:"tags"`
+	People          []ImportPerson         `json:"people"` // 演员、导演、编剧等
 	CommunityRating *float64               `json:"community_rating"`
 	OfficialRating  string                 `json:"official_rating"`
 	TMDBID          string                 `json:"tmdb_id"`
@@ -40,6 +41,12 @@ type ImportItem struct {
 	Sources         []ImportSource         `json:"sources"`
 	Subtitles       []ImportSubtitle       `json:"subtitles"`
 	Seasons         []ImportSeason         `json:"seasons"` // 嵌套的 Seasons（Series 内部）
+}
+
+type ImportPerson struct {
+	Name string `json:"name"`
+	Type string `json:"type"` // Actor, Director, Writer, Producer, etc.
+	Role string `json:"role"` // 角色（仅用于演员）
 }
 
 type ImportSeason struct {
@@ -174,6 +181,20 @@ func importItem(tx *gorm.DB, libraryID string, item ImportItem, parentID *string
 	studiosJSON, _ := json.Marshal(item.Studios)
 	tagsJSON, _ := json.Marshal(item.Tags)
 
+	// 转换 ImportPerson 为 PersonInfo 格式
+	peopleInfo := make([]map[string]interface{}, 0, len(item.People))
+	for _, p := range item.People {
+		person := map[string]interface{}{
+			"Name": p.Name,
+			"Type": p.Type,
+		}
+		if p.Role != "" {
+			person["Role"] = p.Role
+		}
+		peopleInfo = append(peopleInfo, person)
+	}
+	peopleJSON, _ := json.Marshal(peopleInfo)
+
 	mediaItem := &database.MediaItem{
 		ID:              itemID,
 		LibraryID:       libraryID,
@@ -188,6 +209,7 @@ func importItem(tx *gorm.DB, libraryID string, item ImportItem, parentID *string
 		Genres:          string(genresJSON),
 		Studios:         string(studiosJSON),
 		Tags:            string(tagsJSON),
+		People:          string(peopleJSON),
 		TMDBID:          item.TMDBID,
 		IMDBID:          item.IMDBID,
 		TVDBID:          item.TVDBID,
