@@ -90,9 +90,6 @@ func getItems(mediaSvc *service.MediaService) gin.HandlerFunc {
 
 		// 解析查询参数
 		parentID := c.Query("ParentId")
-		if parentID == "" {
-			parentID = ""
-		}
 		recursive := c.DefaultQuery("Recursive", "false") == "true"
 		itemTypesStr := c.Query("IncludeItemTypes")
 		sortBy := c.DefaultQuery("SortBy", "Name")
@@ -100,6 +97,8 @@ func getItems(mediaSvc *service.MediaService) gin.HandlerFunc {
 		fieldsStr := c.Query("Fields")
 		limitStr := c.DefaultQuery("Limit", "100")
 		startIndexStr := c.DefaultQuery("StartIndex", "0")
+		filtersStr := c.Query("Filters") // 新增：Filters 参数
+		searchTerm := c.Query("SearchTerm") // 新增：搜索词
 
 		limit, _ := strconv.Atoi(limitStr)
 		startIndex, _ := strconv.Atoi(startIndexStr)
@@ -112,13 +111,16 @@ func getItems(mediaSvc *service.MediaService) gin.HandlerFunc {
 		// 解析 IncludeItemTypes
 		itemTypes := service.ParseIncludeItemTypes(itemTypesStr)
 
+		// 解析 Filters（逗号分隔）
+		filters := service.ParseFilters(filtersStr)
+
 		// 获取数据
 		var parentIDPtr *string
 		if parentID != "" {
 			parentIDPtr = &parentID
 		}
 
-		items, total, err := mediaSvc.GetItems(parentIDPtr, recursive, itemTypes, sortBy, sortOrder, limit, startIndex)
+		items, total, err := mediaSvc.GetItems(parentIDPtr, recursive, itemTypes, sortBy, sortOrder, limit, startIndex, filters, searchTerm)
 		if err != nil {
 			slog.Error("获取媒体列表失败", "error", err)
 			c.JSON(http.StatusInternalServerError, ErrInternal)
@@ -180,7 +182,7 @@ func getLatest(mediaSvc *service.MediaService) gin.HandlerFunc {
 			parentIDPtr = &parentID
 		}
 
-		items, total, err := mediaSvc.GetItems(parentIDPtr, false, nil, "DateCreated", "Descending", limit, 0)
+		items, total, err := mediaSvc.GetItems(parentIDPtr, false, nil, "DateCreated", "Descending", limit, 0, nil, "")
 		if err != nil {
 			slog.Error("获取最新媒体失败", "error", err)
 			c.JSON(http.StatusInternalServerError, ErrInternal)
@@ -210,7 +212,7 @@ func getItemCounts(mediaSvc *service.MediaService) gin.HandlerFunc {
 		// RodelPlayer 使用这个来显示库的统计信息
 
 		// 获取所有项目
-		items, _, err := mediaSvc.GetItems(nil, true, nil, "", "", 10000, 0)
+		items, _, err := mediaSvc.GetItems(nil, true, nil, "", "", 10000, 0, nil, "")
 		if err != nil {
 			slog.Error("获取媒体计数失败", "error", err)
 			c.JSON(http.StatusInternalServerError, ErrInternal)

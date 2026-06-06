@@ -8,6 +8,7 @@ import (
 	"github.com/fakemby/fakemby/internal/service"
 	"github.com/fakemby/fakemby/internal/types"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 type PlaybackInfoRequest struct {
@@ -16,8 +17,10 @@ type PlaybackInfoRequest struct {
 }
 
 type PlaybackInfoResponse struct {
-	MediaSources []types.MediaSourceDto `json:"MediaSources"`
+	MediaSources  []types.MediaSourceDto `json:"MediaSources"`
 	PlaySessionId string                 `json:"PlaySessionId"`
+	PlayMethod    string                 `json:"PlayMethod"`    // DirectStream, Transcode, etc.
+	TranscodingUrl *string              `json:"TranscodingUrl,omitempty"` // 转码 URL（可选）
 }
 
 func RegisterPlaybackRoutes(router *gin.Engine) {
@@ -35,7 +38,6 @@ func RegisterPlaybackRoutes(router *gin.Engine) {
 
 func getPlaybackInfo(mediaSvc *service.MediaService, playbackSvc *service.PlaybackService) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		userID := c.GetString("user_id")
 		itemID := c.Param("itemId")
 
 		var req PlaybackInfoRequest
@@ -60,40 +62,61 @@ func getPlaybackInfo(mediaSvc *service.MediaService, playbackSvc *service.Playba
 		// 转换为 DTO
 		sourceDTOs := make([]types.MediaSourceDto, 0, len(sources))
 		for _, src := range sources {
+			// 构建媒体流（视频、音频、字幕）
+			mediaStreams := []types.MediaStreamDto{}
+
+			// 添加视频流
+			if item.VideoCodec != "" {
+				videoStream := types.MediaStreamDto{
+					Type:      "Video",
+					Index:     0,
+					Codec:     item.VideoCodec,
+					Width:     item.Width,
+					Height:    item.Height,
+					IsDefault: true,
+				}
+				// 如果有比特率，计算为 Mbps
+				if src.Bitrate != nil && *src.Bitrate > 0 {
+					bitrate := *src.Bitrate
+					videoStream.BitRate = &bitrate
+				}
+				mediaStreams = append(mediaStreams, videoStream)
+			}
+
+			// 添加音频流
+			if item.AudioCodec != "" {
+				audioStream := types.MediaStreamDto{
+					Type:      "Audio",
+					Index:     len(mediaStreams),
+					Codec:     item.AudioCodec,
+					Language:  "en", // 默认英语
+					IsDefault: true,
+					Channels:  intPtr(2), // 默认立体声
+				}
+				mediaStreams = append(mediaStreams, audioStream)
+			}
+
 			sourceDTO := types.MediaSourceDto{
-				ID:        src.ID,
-				Name:      src.Name,
-				Path:      src.URL,
-				Protocol:  "Http",
-				Container: src.Container,
-				Size:      src.Size,
-				Bitrate:   src.Bitrate,
-				MediaStreams: []types.MediaStreamDto{
-					{
-						Type:      "Video",
-						Index:     0,
-						Codec:     item.VideoCodec,
-						Width:     item.Width,
-						Height:    item.Height,
-						IsDefault: true,
-					},
-					{
-						Type:      "Audio",
-						Index:     1,
-						Codec:     item.AudioCodec,
-						IsDefault: true,
-					},
-				},
+				ID:               src.ID,
+				Name:             src.Name,
+				Path:             src.URL,
+				Protocol:         "Http",
+				Container:        src.Container,
+				Size:             src.Size,
+				Bitrate:          src.Bitrate,
+				MediaStreams:     mediaStreams,
+				DefaultAudioStreamIndex: intPtr(1), // 使用第一个音频流
 			}
 			sourceDTOs = append(sourceDTOs, sourceDTO)
 		}
 
 		// 生成 PlaySessionId（用于跟踪播放进度）
-		playSessionID := playbackSvc.GeneratePlaySession(userID, itemID)
+		playSessionID := uuid.New().String()
 
 		resp := PlaybackInfoResponse{
 			MediaSources:  sourceDTOs,
 			PlaySessionId: playSessionID,
+			PlayMethod:    "DirectStream", // 直接流播放
 		}
 
 		c.JSON(http.StatusOK, resp)
@@ -168,4 +191,9 @@ func downloadVideo(mediaSvc *service.MediaService) gin.HandlerFunc {
 		// 使用第一个源进行下载重定向
 		c.Redirect(http.StatusFound, sources[0].URL)
 	}
+}
+
+// intPtr 辅助函数：创建 int 指针
+func intPtr(v int) *int {
+	return &v
 }

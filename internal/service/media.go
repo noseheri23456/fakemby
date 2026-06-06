@@ -20,8 +20,8 @@ func NewMediaService(db *gorm.DB) *MediaService {
 	return &MediaService{db: db}
 }
 
-// GetItems 获取媒体列表（支持搜索、排序、分页）
-func (s *MediaService) GetItems(parentID *string, recursive bool, itemTypes []string, sortBy, sortOrder string, limit, startIndex int) ([]database.MediaItem, int64, error) {
+// GetItems 获取媒体列表（支持搜索、排序、分页、过滤）
+func (s *MediaService) GetItems(parentID *string, recursive bool, itemTypes []string, sortBy, sortOrder string, limit, startIndex int, filters map[string]bool, searchTerm string) ([]database.MediaItem, int64, error) {
 	var items []database.MediaItem
 	var total int64
 
@@ -37,6 +37,31 @@ func (s *MediaService) GetItems(parentID *string, recursive bool, itemTypes []st
 
 	if len(itemTypes) > 0 {
 		query = query.Where("type IN ?", itemTypes)
+	}
+
+	// 应用 Filters
+	if len(filters) > 0 {
+		if filters["IsPlayed"] {
+			// 已看：is_played = true
+			query = query.Where("EXISTS (SELECT 1 FROM play_progress WHERE play_progress.item_id = media_items.id AND play_progress.is_played = true)")
+		}
+		if filters["IsUnwatched"] {
+			// 未看：is_played = false 或没有播放记录
+			query = query.Where("NOT EXISTS (SELECT 1 FROM play_progress WHERE play_progress.item_id = media_items.id AND play_progress.is_played = true)")
+		}
+		if filters["IsFavorite"] {
+			// 收藏：is_favorite = true
+			query = query.Where("EXISTS (SELECT 1 FROM play_progress WHERE play_progress.item_id = media_items.id AND play_progress.is_favorite = true)")
+		}
+		if filters["IsResumable"] {
+			// 可继续观看：position_ticks > 0 且 is_played = false
+			query = query.Where("EXISTS (SELECT 1 FROM play_progress WHERE play_progress.item_id = media_items.id AND play_progress.position_ticks > 0 AND play_progress.is_played = false)")
+		}
+	}
+
+	// 应用文本搜索
+	if searchTerm != "" {
+		query = query.Where("name LIKE ?", "%"+searchTerm+"%")
 	}
 
 	// 计数
@@ -332,6 +357,23 @@ func ParseFields(fieldsStr string) []string {
 		fields[i] = strings.TrimSpace(f)
 	}
 	return fields
+}
+
+// ParseFilters 解析 Filters 参数（逗号分隔）
+func ParseFilters(filtersStr string) map[string]bool {
+	filters := make(map[string]bool)
+	if filtersStr == "" {
+		return filters
+	}
+
+	filterList := strings.Split(filtersStr, ",")
+	for _, f := range filterList {
+		f = strings.TrimSpace(f)
+		if f != "" {
+			filters[f] = true
+		}
+	}
+	return filters
 }
 
 // GetSeasonsBySeriesID 获取剧集的所有季
