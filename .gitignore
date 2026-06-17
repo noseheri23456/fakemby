@@ -1,4 +1,5 @@
 .claude/
+CLAUDE.md
 .playwright-mcp/
 fakemby.exe
 build_test.exe
