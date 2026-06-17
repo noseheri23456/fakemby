@@ -3,6 +3,7 @@ package emby
 import (
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/fakemby/fakemby/internal/database"
 	"github.com/fakemby/fakemby/internal/service"
@@ -29,9 +30,15 @@ func getSeasons(mediaSvc *service.MediaService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.GetString("user_id")
 		seriesID := c.Param("seriesId")
+		fieldsStr := c.Query("Fields")
+
+		limitStr := c.DefaultQuery("Limit", "0")
+		startIndexStr := c.DefaultQuery("StartIndex", "0")
+		limit, _ := strconv.Atoi(limitStr)
+		startIndex, _ := strconv.Atoi(startIndexStr)
 
 		// 查询该 Series 的所有 Season
-		seasons, total, err := mediaSvc.GetSeasonsBySeriesID(seriesID)
+		seasons, total, err := mediaSvc.GetSeasonsBySeriesID(seriesID, limit, startIndex)
 		if err != nil {
 			slog.Error("获取季列表失败", "error", err)
 			c.JSON(http.StatusInternalServerError, ErrInternal)
@@ -39,15 +46,17 @@ func getSeasons(mediaSvc *service.MediaService) gin.HandlerFunc {
 		}
 
 		// 转换为 DTO
+		fields := service.ParseFields(fieldsStr)
 		dtos := make([]interface{}, 0, len(seasons))
 		for _, season := range seasons {
-			dto := mediaSvc.ItemToDTO(&season, userID, nil)
+			dto := mediaSvc.ItemToDTO(&season, userID, fields)
 			dtos = append(dtos, dto)
 		}
 
 		resp := map[string]interface{}{
 			"Items":            dtos,
 			"TotalRecordCount": total,
+			"StartIndex":       startIndex,
 		}
 
 		c.JSON(http.StatusOK, resp)
@@ -59,6 +68,12 @@ func getEpisodes(mediaSvc *service.MediaService) gin.HandlerFunc {
 		userID := c.GetString("user_id")
 		seriesID := c.Param("seriesId")
 		seasonID := c.Query("SeasonId")
+		fieldsStr := c.Query("Fields")
+
+		limitStr := c.DefaultQuery("Limit", "0")
+		startIndexStr := c.DefaultQuery("StartIndex", "0")
+		limit, _ := strconv.Atoi(limitStr)
+		startIndex, _ := strconv.Atoi(startIndexStr)
 
 		var episodes []database.MediaItem
 		var total int64
@@ -66,10 +81,10 @@ func getEpisodes(mediaSvc *service.MediaService) gin.HandlerFunc {
 
 		if seasonID != "" {
 			// 获取特定季的集列表
-			episodes, total, err = mediaSvc.GetEpisodesBySeasonID(seasonID)
+			episodes, total, err = mediaSvc.GetEpisodesBySeasonID(seasonID, limit, startIndex)
 		} else {
 			// 获取 Series 的所有集（所有季）
-			episodes, total, err = mediaSvc.GetEpisodesBySeriesID(seriesID)
+			episodes, total, err = mediaSvc.GetEpisodesBySeriesID(seriesID, limit, startIndex)
 		}
 
 		if err != nil {
@@ -79,15 +94,17 @@ func getEpisodes(mediaSvc *service.MediaService) gin.HandlerFunc {
 		}
 
 		// 转换为 DTO
+		fields := service.ParseFields(fieldsStr)
 		dtos := make([]interface{}, 0, len(episodes))
 		for _, episode := range episodes {
-			dto := mediaSvc.ItemToDTO(&episode, userID, nil)
+			dto := mediaSvc.ItemToDTO(&episode, userID, fields)
 			dtos = append(dtos, dto)
 		}
 
 		resp := map[string]interface{}{
 			"Items":            dtos,
 			"TotalRecordCount": total,
+			"StartIndex":       startIndex,
 		}
 
 		c.JSON(http.StatusOK, resp)

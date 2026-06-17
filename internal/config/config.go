@@ -38,9 +38,9 @@ type AuthConfig struct {
 }
 
 type ImageConfig struct {
-	Mode       string `mapstructure:"mode"`
-	CacheDir   string `mapstructure:"cache_dir"`
-	CDNPrefix  string `mapstructure:"cdn_prefix"`
+	Mode      string `mapstructure:"mode"`
+	CacheDir  string `mapstructure:"cache_dir"`
+	CDNPrefix string `mapstructure:"cdn_prefix"`
 }
 
 type PlaybackConfig struct {

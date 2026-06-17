@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/base64"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -47,7 +50,6 @@ func main() {
 
 	// 注册中间件
 	router.Use(emby.CORSMiddleware())
-	router.Use(emby.CaseInsensitiveRouteMiddleware())
 	router.Use(emby.RequestLogMiddleware())
 	router.Use(emby.ErrorHandlerMiddleware())
 
@@ -55,6 +57,7 @@ func main() {
 	emby.RegisterSystemRoutes(router, cfg)
 	emby.RegisterAuthRoutes(router, cfg)
 	emby.RegisterUserRoutes(router)
+	emby.RegisterUserDataRoutes(router) // Task 4.3 fix
 	emby.RegisterItemRoutes(router)
 	emby.RegisterShowRoutes(router)
 	emby.RegisterAdminItemRoutes(router)
@@ -62,14 +65,20 @@ func main() {
 	emby.RegisterAdminUserRoutes(router)
 	emby.RegisterPlaybackRoutes(router)
 	emby.RegisterSessionRoutes(router)
-	emby.RegisterUserDataRoutes(router)
 	emby.RegisterImageRoutes(router, cfg)
 	emby.RegisterSearchRoutes(router)
+	emby.RegisterStatsRoutes(router)
+
+	// WebSocket 端点 - 客户端连接保活（原生实现）
+	router.GET("/embywebsocket", handleWebSocket)
+
+	// 创建带大小写不敏感路由包装的 HTTP Handler
+	handler := emby.CaseInsensitiveHandler(router)
 
 	// 创建服务器
 	server := &http.Server{
 		Addr:         cfg.Server.GetListenAddr(),
-		Handler:      router,
+		Handler:      handler,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}
@@ -105,4 +114,47 @@ func main() {
 	} else {
 		logger.Info("✓ 服务器安全关闭")
 	}
+}
+
+// handleWebSocket 原生 WebSocket 握手实现
+func handleWebSocket(c *gin.Context) {
+	if !strings.Contains(strings.ToLower(c.GetHeader("Upgrade")), "websocket") {
+		c.Status(http.StatusBadRequest)
+		return
+	}
+
+	key := c.GetHeader("Sec-WebSocket-Key")
+	if key == "" {
+		c.Status(http.StatusBadRequest)
+		return
+	}
+
+	magic := "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+	hash := sha1.Sum([]byte(key + magic))
+	accept := base64.StdEncoding.EncodeToString(hash[:])
+
+	c.Writer.Header().Set("Upgrade", "websocket")
+	c.Writer.Header().Set("Connection", "Upgrade")
+	c.Writer.Header().Set("Sec-WebSocket-Accept", accept)
+	c.Writer.WriteHeader(http.StatusSwitchingProtocols)
+
+	hj, ok := c.Writer.(http.Hijacker)
+	if !ok {
+		return
+	}
+	conn, buf, err := hj.Hijack()
+	if err != nil {
+		return
+	}
+
+	go func() {
+		defer conn.Close()
+		for {
+			// read messages and ignore to keep connection alive
+			_, err := buf.ReadByte()
+			if err != nil {
+				return
+			}
+		}
+	}()
 }

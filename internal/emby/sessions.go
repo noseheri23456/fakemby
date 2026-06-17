@@ -12,18 +12,29 @@ import (
 	"gorm.io/gorm"
 )
 
+var (
+	activeSessionsMu sync.RWMutex
+	activeSessions   = make(map[string]*SessionInfo)
+)
+
+type NowPlayingItem struct {
+	Id   string `json:"Id"`
+	Name string `json:"Name"`
+	Type string `json:"Type"`
+}
+
 type PlayingRequest struct {
-	ItemId              string `json:"ItemId" binding:"required"`
-	MediaSourceId       string `json:"MediaSourceId"`
-	PlaySessionId       string `json:"PlaySessionId"`
-	PositionTicks       int64  `json:"PositionTicks"`
-	IsPaused            bool   `json:"IsPaused"`
-	IsMuted             bool   `json:"IsMuted"`
-	PlaybackRate        float64 `json:"PlaybackRate"`
-	VolumeLevel         int    `json:"VolumeLevel"`
-	Brightness          int    `json:"Brightness"`
-	AspectRatio         string `json:"AspectRatio"`
-	PlayMethod          string `json:"PlayMethod"`
+	ItemId        string  `json:"ItemId" binding:"required"`
+	MediaSourceId string  `json:"MediaSourceId"`
+	PlaySessionId string  `json:"PlaySessionId"`
+	PositionTicks int64   `json:"PositionTicks"`
+	IsPaused      bool    `json:"IsPaused"`
+	IsMuted       bool    `json:"IsMuted"`
+	PlaybackRate  float64 `json:"PlaybackRate"`
+	VolumeLevel   int     `json:"VolumeLevel"`
+	Brightness    int     `json:"Brightness"`
+	AspectRatio   string  `json:"AspectRatio"`
+	PlayMethod    string  `json:"PlayMethod"`
 }
 
 type StoppedRequest struct {
@@ -144,6 +155,71 @@ func RegisterSessionRoutes(router *gin.Engine) {
 	router.POST("/emby/Sessions/Playing", AuthTokenMiddleware(30), playingStart())
 	router.POST("/emby/Sessions/Playing/Progress", AuthTokenMiddleware(30), playingProgress())
 	router.POST("/emby/Sessions/Playing/Stopped", AuthTokenMiddleware(30), playingStopped())
+	
+	// Sessions API
+	router.GET("/emby/Sessions", AuthTokenMiddleware(30), RequireAdmin(), getSessions())
+	router.POST("/emby/Sessions/:sessionId/Playing/Stop", AuthTokenMiddleware(30), RequireAdmin(), stopSession())
+	router.POST("/emby/Sessions/:sessionId/Message", AuthTokenMiddleware(30), RequireAdmin(), sessionMessage())
+	
+	// Devices API
+	router.GET("/emby/Devices/Info", AuthTokenMiddleware(30), getDeviceInfo())
+
+	// 客户端能力报告 (Task 4.4)
+	router.POST("/emby/Sessions/Capabilities/Full", AuthTokenMiddleware(30), func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+}
+
+func getSessions() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		activeSessionsMu.RLock()
+		sessions := make([]SessionInfo, 0, len(activeSessions))
+		for _, s := range activeSessions {
+			sessions = append(sessions, *s)
+		}
+		activeSessionsMu.RUnlock()
+		c.JSON(http.StatusOK, sessions)
+	}
+}
+
+func stopSession() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		sessionID := c.Param("sessionId")
+		activeSessionsMu.Lock()
+		delete(activeSessions, sessionID)
+		activeSessionsMu.Unlock()
+		c.Status(http.StatusNoContent)
+	}
+}
+
+func sessionMessage() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	}
+}
+
+func getDeviceInfo() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		deviceID := c.Query("Id")
+		var token database.Token
+		if err := database.Get().Where("device_id = ?", deviceID).Order("created_at desc").First(&token).Error; err != nil {
+			c.JSON(http.StatusNotFound, ErrNotFound)
+			return
+		}
+
+		var user database.User
+		database.Get().Where("id = ?", token.UserID).First(&user)
+
+		c.JSON(http.StatusOK, gin.H{
+			"Id":               token.DeviceID,
+			"Name":             token.DeviceName,
+			"LastUserId":       token.UserID,
+			"LastUserName":     user.Name,
+			"AppName":          token.Client,
+			"AppVersion":       token.Version,
+			"DateLastActivity": token.CreatedAt.Format(time.RFC3339),
+		})
+	}
 }
 
 func playingStart() gin.HandlerFunc {
@@ -175,6 +251,9 @@ func playingStart() gin.HandlerFunc {
 			progressBuffer.buffer[key] = prog
 			progressBuffer.mu.Unlock()
 		}
+
+		// Update active sessions
+		updateActiveSession(userID, req.PlaySessionId, req.ItemId, req.PositionTicks, req.IsPaused, c.ClientIP())
 
 		c.Status(http.StatusNoContent)
 	}
@@ -210,6 +289,9 @@ func playingProgress() gin.HandlerFunc {
 				"position_ticks", req.PositionTicks,
 			)
 		}
+
+		// Update active sessions
+		updateActiveSession(userID, req.PlaySessionId, req.ItemId, req.PositionTicks, req.IsPaused, c.ClientIP())
 
 		c.Status(http.StatusNoContent)
 	}
@@ -265,6 +347,34 @@ func playingStopped() gin.HandlerFunc {
 				database.Get().Model(&progress).Updates(prog)
 			}
 
+			// 记录 PlaybackActivity
+			if item != nil {
+				// 获取此会话的初始信息以获取 IP 和 DeviceName
+				var clientName, deviceName, deviceId, remoteAddr string
+				activeSessionsMu.RLock()
+				if session, ok := activeSessions[req.PlaySessionId]; ok {
+					clientName = session.Client
+					deviceName = session.DeviceName
+					deviceId = session.DeviceId
+					remoteAddr = session.RemoteEndPoint
+				}
+				activeSessionsMu.RUnlock()
+
+				activity := database.PlaybackActivity{
+					UserID:        userID,
+					ItemID:        req.ItemId,
+					ItemType:      item.Type,
+					ItemName:      item.Name,
+					PlayDuration:  int(req.PositionTicks / 10000000), // 假设 Ticks 是 100 纳秒级别
+					PauseDuration: 0,
+					ClientName:    clientName,
+					DeviceName:    deviceName,
+					DeviceID:      deviceId,
+					RemoteAddress: remoteAddr,
+				}
+				database.Get().Create(&activity)
+			}
+
 			// 从缓冲中删除
 			delete(progressBuffer.buffer, key)
 			progressBuffer.mu.Unlock()
@@ -277,6 +387,48 @@ func playingStopped() gin.HandlerFunc {
 			)
 		}
 
+		activeSessionsMu.Lock()
+		delete(activeSessions, req.PlaySessionId)
+		activeSessionsMu.Unlock()
+
 		c.Status(http.StatusNoContent)
 	}
+}
+
+func updateActiveSession(userID, sessionID, itemID string, positionTicks int64, isPaused bool, ip string) {
+	if sessionID == "" {
+		sessionID = userID // fallback
+	}
+	
+	var user database.User
+	database.Get().Where("id = ?", userID).First(&user)
+	
+	var item database.MediaItem
+	database.Get().Where("id = ?", itemID).First(&item)
+	
+	activeSessionsMu.Lock()
+	defer activeSessionsMu.Unlock()
+	
+	session, exists := activeSessions[sessionID]
+	if !exists {
+		session = &SessionInfo{
+			Id: sessionID,
+			UserId: userID,
+			UserName: user.Name,
+			RemoteEndPoint: ip,
+		}
+	}
+	
+	session.LastActivityDate = time.Now().Format(time.RFC3339)
+	session.NowPlayingItem = &NowPlayingItem{
+		Id: item.ID,
+		Name: item.Name,
+		Type: item.Type,
+	}
+	session.PlayState = PlayState{
+		PositionTicks: &positionTicks,
+		IsPaused: isPaused,
+	}
+	
+	activeSessions[sessionID] = session
 }

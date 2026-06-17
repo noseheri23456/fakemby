@@ -10,47 +10,56 @@ import (
 
 	"github.com/fakemby/fakemby/internal/database"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 type ImportRequest struct {
-	Library string        `json:"library"`
-	Items   []ImportItem  `json:"items"`
+	Library string       `json:"library"`
+	Items   []ImportItem `json:"items"`
 }
 
 type ImportItem struct {
-	Name            string                 `json:"name"`
-	OriginalTitle   string                 `json:"original_title"`
-	Year            *int                   `json:"year"`
-	Type            string                 `json:"type"` // Movie, Series, Season, Episode
-	Overview        string                 `json:"overview"`
-	Genres          []string               `json:"genres"`
-	Studios         []string               `json:"studios"`
-	Tags            []string               `json:"tags"`
-	People          []ImportPerson         `json:"people"` // 演员、导演、编剧等
-	CommunityRating *float64               `json:"community_rating"`
-	OfficialRating  string                 `json:"official_rating"`
-	TMDBID          string                 `json:"tmdb_id"`
-	IMDBID          string                 `json:"imdb_id"`
-	TVDBID          string                 `json:"tvdb_id"`
+	Name            string            `json:"name"`
+	OriginalTitle   string            `json:"original_title"`
+	Year            *int              `json:"year"`
+	Type            string            `json:"type"` // Movie, Series, Season, Episode
+	Overview        string            `json:"overview"`
+	Genres          []string          `json:"genres"`
+	Studios         []string          `json:"studios"`
+	Tags            []string                 `json:"tags"`
+	Taglines        []string                 `json:"taglines"`        // 电影标语
+	ExternalUrls    []ImportExternalUrl      `json:"external_urls"`   // 外部链接
+	People          []ImportPerson           `json:"people"`          // 演员、导演、编剧等
+	CommunityRating *float64          `json:"community_rating"`
+	OfficialRating  string            `json:"official_rating"` // PG, R, NC-17 等
+	TMDBID          string            `json:"tmdb_id"`
+	IMDBID          string            `json:"imdb_id"`
+	TVDBID          string            `json:"tvdb_id"`
 	RuntimeMinutes  *int64                 `json:"runtime_minutes"`
+	IsHidden        bool                   `json:"is_hidden"`
 	SeasonNumber    *int                   `json:"season_number"`
-	EpisodeNumber   *int                   `json:"episode_number"`
-	Images          map[string]string      `json:"images"` // type -> URL
-	Sources         []ImportSource         `json:"sources"`
-	Subtitles       []ImportSubtitle       `json:"subtitles"`
-	Seasons         []ImportSeason         `json:"seasons"` // 嵌套的 Seasons（Series 内部）
+	EpisodeNumber   *int              `json:"episode_number"`
+	PremiereDate    *string           `json:"premiere_date"` // ISO 8601 格式
+	Images          map[string]string `json:"images"`        // type -> URL
+	Sources         []ImportSource    `json:"sources"`
+	Subtitles       []ImportSubtitle  `json:"subtitles"`
+	Seasons         []ImportSeason    `json:"seasons"` // 嵌套的 Seasons（Series 内部）
 }
 
 type ImportPerson struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"` // Actor, Director, Writer, Producer, etc.
+	Role     string `json:"role"` // 角色（仅用于演员）
+	ImageUrl string `json:"image_url"` // 头像链接
+}
+
+type ImportExternalUrl struct {
 	Name string `json:"name"`
-	Type string `json:"type"` // Actor, Director, Writer, Producer, etc.
-	Role string `json:"role"` // 角色（仅用于演员）
+	Url  string `json:"url"`
 }
 
 type ImportSeason struct {
-	SeasonNumber *int           `json:"season_number"`
+	SeasonNumber *int            `json:"season_number"`
 	Episodes     []ImportEpisode `json:"episodes"`
 }
 
@@ -153,7 +162,7 @@ func getOrCreateLibrary(libName string) (*database.Library, error) {
 		}
 
 		lib = database.Library{
-			ID:   uuid.New().String(),
+			ID:   newShortID(),
 			Name: libName,
 			Type: libType,
 		}
@@ -167,7 +176,7 @@ func getOrCreateLibrary(libName string) (*database.Library, error) {
 }
 
 func importItem(tx *gorm.DB, libraryID string, item ImportItem, parentID *string) error {
-	itemID := uuid.New().String()
+	itemID := newShortID()
 
 	// 计算运行时间（转换为 ticks：100纳秒）
 	var runtimeTicks *int64
@@ -176,24 +185,76 @@ func importItem(tx *gorm.DB, libraryID string, item ImportItem, parentID *string
 		runtimeTicks = &ticks
 	}
 
-	// 序列化 JSON 字段
-	genresJSON, _ := json.Marshal(item.Genres)
-	studiosJSON, _ := json.Marshal(item.Studios)
-	tagsJSON, _ := json.Marshal(item.Tags)
+	// 序列化 JSON 字段前，先创建实体并获取 ID
+	generateDeterministicID := func(prefix, name string) string {
+		hash := md5.Sum([]byte(prefix + ":" + name))
+		return hex.EncodeToString(hash[:])
+	}
 
-	// 转换 ImportPerson 为 PersonInfo 格式
+	createVirtualItem := func(id, name, itemType string) {
+		var count int64
+		tx.Model(&database.MediaItem{}).Where("id = ?", id).Count(&count)
+		if count == 0 {
+			tx.Create(&database.MediaItem{
+				ID:       id,
+				Name:     name,
+				Type:     itemType,
+			})
+		}
+	}
+
+	// 转换 Genres
+	for _, g := range item.Genres {
+		createVirtualItem(generateDeterministicID("genre", g), g, "Genre")
+	}
+	genresJSON, _ := json.Marshal(item.Genres)
+
+	// 转换 Studios
+	for _, s := range item.Studios {
+		createVirtualItem(generateDeterministicID("studio", s), s, "Studio")
+	}
+	studiosJSON, _ := json.Marshal(item.Studios)
+
+	// 转换 ImportPerson 为 PersonInfo 格式并创建实体
 	peopleInfo := make([]map[string]interface{}, 0, len(item.People))
 	for _, p := range item.People {
+		personID := generateDeterministicID("person", p.Name)
+		createVirtualItem(personID, p.Name, "Person")
+		
 		person := map[string]interface{}{
 			"Name": p.Name,
 			"Type": p.Type,
+			"Id":   personID,
 		}
 		if p.Role != "" {
 			person["Role"] = p.Role
 		}
+
+		if p.ImageUrl != "" {
+			hash := md5.Sum([]byte(p.ImageUrl))
+			tag := hex.EncodeToString(hash[:])[:8]
+			
+			// 保存到数据库
+			var imgCount int64
+			tx.Model(&database.Image{}).Where("item_id = ? AND type = ?", personID, "Primary").Count(&imgCount)
+			if imgCount == 0 {
+				tx.Create(&database.Image{
+					ItemID: personID,
+					Type:   "Primary",
+					URL:    p.ImageUrl,
+					Tag:    tag,
+				})
+			}
+			person["PrimaryImageTag"] = tag
+		}
+
 		peopleInfo = append(peopleInfo, person)
 	}
 	peopleJSON, _ := json.Marshal(peopleInfo)
+
+	tagsJSON, _ := json.Marshal(item.Tags)
+	taglinesJSON, _ := json.Marshal(item.Taglines)
+	externalUrlsJSON, _ := json.Marshal(item.ExternalUrls)
 
 	mediaItem := &database.MediaItem{
 		ID:              itemID,
@@ -204,16 +265,20 @@ func importItem(tx *gorm.DB, libraryID string, item ImportItem, parentID *string
 		OriginalTitle:   item.OriginalTitle,
 		Overview:        item.Overview,
 		Year:            item.Year,
+		PremiereDate:    normalizePremiereDateFromStr(item.PremiereDate),
 		CommunityRating: item.CommunityRating,
 		OfficialRating:  item.OfficialRating,
 		Genres:          string(genresJSON),
 		Studios:         string(studiosJSON),
 		Tags:            string(tagsJSON),
+		Taglines:        string(taglinesJSON),
+		ExternalUrls:    string(externalUrlsJSON),
 		People:          string(peopleJSON),
 		TMDBID:          item.TMDBID,
 		IMDBID:          item.IMDBID,
 		TVDBID:          item.TVDBID,
 		RuntimeTicks:    runtimeTicks,
+		IsHidden:        item.IsHidden,
 		SeasonNumber:    item.SeasonNumber,
 		EpisodeNumber:   item.EpisodeNumber,
 	}
@@ -225,7 +290,7 @@ func importItem(tx *gorm.DB, libraryID string, item ImportItem, parentID *string
 	// 导入媒体源
 	for _, src := range item.Sources {
 		source := &database.MediaSource{
-			ID:        uuid.New().String(),
+			ID:        newShortID(),
 			ItemID:    itemID,
 			Name:      src.Name,
 			URL:       src.URL,
@@ -277,12 +342,12 @@ func importItem(tx *gorm.DB, libraryID string, item ImportItem, parentID *string
 
 			// 创建 Season
 			seasonItem := ImportItem{
-				Name:       fmt.Sprintf("Season %d", seasonNum),
-				Type:       "Season",
+				Name:         fmt.Sprintf("Season %d", seasonNum),
+				Type:         "Season",
 				SeasonNumber: &seasonNum,
 			}
 
-			seasonID := uuid.New().String()
+			seasonID := newShortID()
 			seasonDBItem := &database.MediaItem{
 				ID:           seasonID,
 				LibraryID:    libraryID,
@@ -303,15 +368,15 @@ func importItem(tx *gorm.DB, libraryID string, item ImportItem, parentID *string
 					episodeNum = *episode.EpisodeNumber
 				}
 
-				episodeItem := &database.MediaItem{
-					ID:                 uuid.New().String(),
-					LibraryID:          libraryID,
-					ParentID:           &seasonID,
-					Type:               "Episode",
-					Name:               episode.Name,
-					Overview:           episode.Overview,
-					SeasonNumber:       &seasonNum,
-					EpisodeNumber:      &episodeNum,
+			episodeItem := &database.MediaItem{
+				ID:               newShortID(),
+					LibraryID:     libraryID,
+					ParentID:      &seasonID,
+					Type:          "Episode",
+					Name:          episode.Name,
+					Overview:      episode.Overview,
+					SeasonNumber:  &seasonNum,
+					EpisodeNumber: &episodeNum,
 				}
 
 				if err := tx.Create(episodeItem).Error; err != nil {
@@ -320,8 +385,8 @@ func importItem(tx *gorm.DB, libraryID string, item ImportItem, parentID *string
 
 				// 添加 Episode 的播放源
 				for _, src := range episode.Sources {
-					source := &database.MediaSource{
-						ID:        uuid.New().String(),
+				source := &database.MediaSource{
+					ID:        newShortID(),
 						ItemID:    episodeItem.ID,
 						Name:      src.Name,
 						URL:       src.URL,
@@ -348,6 +413,18 @@ func generateImageTag(url string) string {
 		return hashStr[:8]
 	}
 	return hashStr
+}
+
+func normalizePremiereDateFromStr(dateStr *string) *string {
+	if dateStr == nil || *dateStr == "" {
+		return dateStr
+	}
+	d := *dateStr
+	if len(d) == 10 && d[4] == '-' && d[7] == '-' {
+		normalized := d + "T00:00:00Z"
+		return &normalized
+	}
+	return dateStr
 }
 
 // adminAuth 管理接口认证中间件

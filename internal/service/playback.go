@@ -78,8 +78,16 @@ func (s *PlaybackService) MarkAsPlayed(userID, itemID string) error {
 
 // UnmarkAsPlayed 取消已看标记
 func (s *PlaybackService) UnmarkAsPlayed(userID, itemID string) error {
-	return s.db.Where("user_id = ? AND item_id = ?", userID, itemID).
-		Update("is_played", false).Error
+	result := s.db.Where("user_id = ? AND item_id = ?", userID, itemID).
+		Update("is_played", false)
+	if result.Error != nil {
+		// 忽略 "no rows" 错误（没有记录无需取消标记）
+		if result.RowsAffected == 0 {
+			return nil
+		}
+		return result.Error
+	}
+	return nil
 }
 
 // MarkAsFavorite 标记为收藏
@@ -104,8 +112,15 @@ func (s *PlaybackService) MarkAsFavorite(userID, itemID string) error {
 
 // UnmarkAsFavorite 取消收藏
 func (s *PlaybackService) UnmarkAsFavorite(userID, itemID string) error {
-	return s.db.Where("user_id = ? AND item_id = ?", userID, itemID).
-		Update("is_favorite", false).Error
+	result := s.db.Where("user_id = ? AND item_id = ?", userID, itemID).
+		Update("is_favorite", false)
+	if result.Error != nil {
+		if result.RowsAffected == 0 {
+			return nil
+		}
+		return result.Error
+	}
+	return nil
 }
 
 // GetPlayProgress 获取播放进度

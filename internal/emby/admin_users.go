@@ -23,16 +23,39 @@ type UserResponse struct {
 }
 
 type StatsResponse struct {
-	Users         int64 `json:"users"`
-	MediaItems    int64 `json:"media_items"`
-	MediaSources  int64 `json:"media_sources"`
-	Libraries     int64 `json:"libraries"`
+	Users        int64 `json:"users"`
+	MediaItems   int64 `json:"media_items"`
+	MediaSources int64 `json:"media_sources"`
+	Libraries    int64 `json:"libraries"`
 }
 
 func RegisterAdminUserRoutes(router *gin.Engine) {
 	router.POST("/api/admin/users", adminAuth(), createUser())
+	router.GET("/api/admin/users", adminAuth(), listUsers())
 	router.DELETE("/api/admin/users/:userId", adminAuth(), deleteUser())
 	router.GET("/api/admin/stats", adminAuth(), getStats())
+}
+
+func listUsers() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var users []database.User
+		if err := database.Get().Find(&users).Error; err != nil {
+			slog.Error("获取用户列表失败", "error", err)
+			c.JSON(http.StatusInternalServerError, ErrInternal)
+			return
+		}
+
+		resp := make([]UserResponse, 0, len(users))
+		for _, u := range users {
+			resp = append(resp, UserResponse{
+				ID:      u.ID,
+				Name:    u.Name,
+				IsAdmin: u.IsAdmin,
+			})
+		}
+
+		c.JSON(http.StatusOK, resp)
+	}
 }
 
 func createUser() gin.HandlerFunc {

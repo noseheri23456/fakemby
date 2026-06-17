@@ -2,15 +2,17 @@ package emby
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/fakemby/fakemby/internal/database"
+	"github.com/fakemby/fakemby/internal/config"
 	"github.com/fakemby/fakemby/internal/service"
 	"github.com/fakemby/fakemby/internal/types"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 func RegisterItemRoutes(router *gin.Engine) {
@@ -39,6 +41,16 @@ func RegisterItemRoutes(router *gin.Engine) {
 	// 媒体详情
 	router.GET("/emby/Users/:userId/Items/:itemId", authMiddleware, itemHandler)
 	router.GET("/emby/users/:userId/items/:itemId", authMiddleware, itemHandler) // 小写版本
+	
+	// 虚拟文件夹 (Sakura_embyboss 依赖)
+	router.GET("/emby/Library/VirtualFolders", authMiddleware, getVirtualFolders(mediaSvc))
+
+	// 全局搜索 (Sakura_embyboss 依赖)
+	router.GET("/emby/Items", authMiddleware, itemsHandler)
+
+	// 媒体祖先 (Task 4.6)
+	router.GET("/emby/Items/:itemId/Ancestors", authMiddleware, getAncestors(mediaSvc))
+	router.GET("/emby/items/:itemId/ancestors", authMiddleware, getAncestors(mediaSvc))
 
 	// 最新添加
 	router.GET("/emby/Users/:userId/Items/Latest", authMiddleware, latestHandler)
@@ -47,11 +59,18 @@ func RegisterItemRoutes(router *gin.Engine) {
 	// 媒体计数（RodelPlayer 需要这个端点来显示库统计）
 	router.GET("/emby/Items/Counts", authMiddleware, countsHandler)
 	router.GET("/emby/items/counts", authMiddleware, countsHandler) // 小写版本
+
+	// 演员列表（小幻等客户端请求收藏演员）
+	router.GET("/emby/Persons", authMiddleware, getPersons())
 }
 
 func getViews(mediaSvc *service.MediaService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.GetString("user_id")
+		paramUserID := c.Param("userId")
+		if paramUserID != "" {
+			userID = paramUserID
+		}
 		if userID == "" {
 			c.JSON(http.StatusUnauthorized, ErrUnauthorized)
 			return
@@ -65,20 +84,58 @@ func getViews(mediaSvc *service.MediaService) gin.HandlerFunc {
 			return
 		}
 
+		cfg := config.Get()
+		ratio := 1.7777777777777777
+
 		// 转换为 DTO
 		items := make([]types.BaseItemDto, 0, len(libraries))
 		for _, lib := range libraries {
+			subviews := []string{lib.Type, "tags", "genres", "folders"}
+			now := time.Now().UTC().Format(time.RFC3339Nano)
 			dto := types.BaseItemDto{
-				ID:             lib.ID,
-				Name:           lib.Name,
-				Type:           "CollectionFolder",
-				IsFolder:       true,
-				CollectionType: lib.Type,
-				DateCreated:    "",
+				ID:                    lib.ID,
+				Name:                  lib.Name,
+				Guid:                  lib.ID,
+				Etag:                  fmt.Sprintf("%032x", time.Now().UnixNano()),
+				Type:                  "CollectionFolder",
+				IsFolder:              true,
+				CollectionType:        lib.Type,
+				SortName:              lib.Name,
+				ForcedSortName:        lib.Name,
+				ServerID:              cfg.Server.ID,
+				CanDelete:             false,
+				CanDownload:           false,
+				SupportsSync:          true,
+				LockData:              false,
+				ParentID:              "2",
+				Subviews:              subviews,
+				DateCreated:           now,
+				DateModified:          now,
+				PrimaryImageAspectRatio: &ratio,
+				ImageTags:             map[string]string{},
+				BackdropImageTags:     []string{},
+				MediaSources:          []types.MediaSourceDto{},
+				ProviderIds:           map[string]string{},
+				RemoteTrailers:        []types.ExternalUrl{},
+				ExternalUrls:          []types.ExternalUrl{},
+				LockedFields:          []string{},
+				GenreItems:            []types.NameIdPair{},
+				Genres:                []string{},
+				Studios:               []types.NameIdPair{},
+				Tags:                  []string{},
+				Taglines:              []string{},
+				People:                []types.PersonInfo{},
+				PresentationUniqueKey: lib.ID,
+				DisplayPreferencesId:  lib.ID,
+				UserData: &types.UserItemDataDto{
+					PlaybackPositionTicks: 0,
+					PlayCount:             0,
+					IsFavorite:            false,
+					Played:                false,
+				},
 			}
 			items = append(items, dto)
 		}
-
 		resp := types.ItemsResponse{
 			Items:            items,
 			TotalRecordCount: len(items),
@@ -92,6 +149,10 @@ func getViews(mediaSvc *service.MediaService) gin.HandlerFunc {
 func getFolders(mediaSvc *service.MediaService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.GetString("user_id")
+		paramUserID := c.Param("userId")
+		if paramUserID != "" {
+			userID = paramUserID
+		}
 		if userID == "" {
 			c.JSON(http.StatusUnauthorized, ErrUnauthorized)
 			return
@@ -106,6 +167,9 @@ func getFolders(mediaSvc *service.MediaService) gin.HandlerFunc {
 			return
 		}
 
+		cfg := config.Get()
+		ratio := 1.7777777777777777
+
 		// 转换为文件夹 DTO
 		items := make([]types.BaseItemDto, 0, len(libraries))
 		for _, lib := range libraries {
@@ -115,14 +179,50 @@ func getFolders(mediaSvc *service.MediaService) gin.HandlerFunc {
 				Model(&database.MediaItem{}).Count(&childCount)
 
 			childCountInt := int(childCount)
+			subviews2 := []string{lib.Type, "tags", "genres", "folders"}
+			now := time.Now().UTC().Format(time.RFC3339Nano)
 			dto := types.BaseItemDto{
-				ID:             lib.ID,
-				Name:           lib.Name,
-				Type:           "Folder",
-				IsFolder:       true,
-				MediaType:      "Folder",
-				ChildCount:     &childCountInt,
-				CollectionType: lib.Type,
+				ID:                    lib.ID,
+				Name:                  lib.Name,
+				Guid:                  lib.ID,
+				Etag:                  fmt.Sprintf("%032x", time.Now().UnixNano()),
+				Type:                  "Folder",
+				IsFolder:              true,
+				CollectionType:        lib.Type,
+				SortName:              lib.Name,
+				ForcedSortName:        lib.Name,
+				ServerID:              cfg.Server.ID,
+				CanDelete:             false,
+				CanDownload:           false,
+				SupportsSync:          true,
+				LockData:              false,
+				ChildCount:            &childCountInt,
+				ParentID:              "2",
+				Subviews:              subviews2,
+				DateCreated:           now,
+				DateModified:          now,
+				PrimaryImageAspectRatio: &ratio,
+				ImageTags:             map[string]string{},
+				BackdropImageTags:     []string{},
+				MediaSources:          []types.MediaSourceDto{},
+				ProviderIds:           map[string]string{},
+				RemoteTrailers:        []types.ExternalUrl{},
+				ExternalUrls:          []types.ExternalUrl{},
+				LockedFields:          []string{},
+				GenreItems:            []types.NameIdPair{},
+				Genres:                []string{},
+				Studios:               []types.NameIdPair{},
+				Tags:                  []string{},
+				Taglines:              []string{},
+				People:                []types.PersonInfo{},
+				PresentationUniqueKey: lib.ID,
+				DisplayPreferencesId:  lib.ID,
+				UserData: &types.UserItemDataDto{
+					PlaybackPositionTicks: 0,
+					PlayCount:             0,
+					IsFavorite:            false,
+					Played:                false,
+				},
 			}
 			items = append(items, dto)
 		}
@@ -137,9 +237,36 @@ func getFolders(mediaSvc *service.MediaService) gin.HandlerFunc {
 	}
 }
 
+func getVirtualFolders(mediaSvc *service.MediaService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		libraries, err := mediaSvc.GetLibraries()
+		if err != nil {
+			slog.Error("获取虚拟文件夹失败", "error", err)
+			c.JSON(http.StatusInternalServerError, ErrInternal)
+			return
+		}
+
+		var folders []gin.H
+		for _, lib := range libraries {
+			folders = append(folders, gin.H{
+				"Name":           lib.Name,
+				"Guid":           lib.ID,
+				"CollectionType": lib.Type,
+				"Locations":      []string{},
+				"LibraryOptions": gin.H{},
+			})
+		}
+		c.JSON(http.StatusOK, folders)
+	}
+}
+
 func getItems(mediaSvc *service.MediaService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.GetString("user_id")
+		paramUserID := c.Param("userId")
+		if paramUserID != "" {
+			userID = paramUserID
+		}
 
 		// 解析查询参数
 		parentID := c.Query("ParentId")
@@ -150,7 +277,7 @@ func getItems(mediaSvc *service.MediaService) gin.HandlerFunc {
 		fieldsStr := c.Query("Fields")
 		limitStr := c.DefaultQuery("Limit", "100")
 		startIndexStr := c.DefaultQuery("StartIndex", "0")
-		filtersStr := c.Query("Filters") // 新增：Filters 参数
+		filtersStr := c.Query("Filters")    // 新增：Filters 参数
 		searchTerm := c.Query("SearchTerm") // 新增：搜索词
 
 		limit, _ := strconv.Atoi(limitStr)
@@ -166,6 +293,11 @@ func getItems(mediaSvc *service.MediaService) gin.HandlerFunc {
 
 		// 解析 Filters（逗号分隔）
 		filters := service.ParseFilters(filtersStr)
+		
+		genresFilter := c.Query("Genres")
+		yearsFilter := c.Query("Years")
+		personIdsFilter := c.Query("PersonIds")
+		studioIdsFilter := c.Query("StudioIds")
 
 		// 获取数据
 		var parentIDPtr *string
@@ -173,7 +305,7 @@ func getItems(mediaSvc *service.MediaService) gin.HandlerFunc {
 			parentIDPtr = &parentID
 		}
 
-		items, total, err := mediaSvc.GetItems(parentIDPtr, recursive, itemTypes, sortBy, sortOrder, limit, startIndex, filters, searchTerm)
+		items, total, err := mediaSvc.GetItems(userID, parentIDPtr, recursive, itemTypes, sortBy, sortOrder, limit, startIndex, filters, searchTerm, genresFilter, yearsFilter, personIdsFilter, studioIdsFilter)
 		if err != nil {
 			slog.Error("获取媒体列表失败", "error", err)
 			c.JSON(http.StatusInternalServerError, ErrInternal)
@@ -236,7 +368,7 @@ func getLatest(mediaSvc *service.MediaService) gin.HandlerFunc {
 			parentIDPtr = &parentID
 		}
 
-		items, total, err := mediaSvc.GetItems(parentIDPtr, false, nil, "DateCreated", "Descending", limit, 0, nil, "")
+		items, _, err := mediaSvc.GetItems(userID, parentIDPtr, false, nil, "DateCreated", "Descending", limit, 0, nil, "", "", "", "", "")
 		if err != nil {
 			slog.Error("获取最新媒体失败", "error", err)
 			c.JSON(http.StatusInternalServerError, ErrInternal)
@@ -250,13 +382,34 @@ func getLatest(mediaSvc *service.MediaService) gin.HandlerFunc {
 			dtos = append(dtos, *dto)
 		}
 
-		resp := types.ItemsResponse{
-			Items:            dtos,
-			TotalRecordCount: int(total),
-			StartIndex:       0,
+		c.JSON(http.StatusOK, dtos)
+	}
+}
+
+func getAncestors(mediaSvc *service.MediaService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		itemID := c.Param("itemId")
+		userID := c.GetString("user_id")
+
+		var ancestors []interface{}
+		currentID := itemID
+
+		for {
+			item, err := mediaSvc.GetItemByID(currentID)
+			if err != nil || item.ParentID == nil || *item.ParentID == "" {
+				break
+			}
+			parentItem, err := mediaSvc.GetItemByID(*item.ParentID)
+			if err != nil {
+				break
+			}
+			
+			dto := mediaSvc.ItemToDTO(parentItem, userID, nil)
+			ancestors = append(ancestors, dto)
+			currentID = parentItem.ID
 		}
 
-		c.JSON(http.StatusOK, resp)
+		c.JSON(http.StatusOK, ancestors)
 	}
 }
 
@@ -266,32 +419,36 @@ func getItemCounts(mediaSvc *service.MediaService) gin.HandlerFunc {
 		// RodelPlayer 使用这个来显示库的统计信息
 
 		// 获取所有项目
-		items, _, err := mediaSvc.GetItems(nil, true, nil, "", "", 10000, 0, nil, "")
+		items, _, err := mediaSvc.GetItems("", nil, true, nil, "", "", 10000, 0, nil, "", "", "", "", "")
 		if err != nil {
 			slog.Error("获取媒体计数失败", "error", err)
 			c.JSON(http.StatusInternalServerError, ErrInternal)
 			return
 		}
 
-		// 统计各类型的数量
+		// 统计各类型的数量（Emby 格式）
 		counts := gin.H{
-			"Movies":   0,
-			"Series":   0,
-			"Episodes": 0,
-			"Seasons":  0,
-			"Total":    len(items),
+			"MovieCount":      0,
+			"SeriesCount":     0,
+			"EpisodeCount":    0,
+			"SeasonCount":     0,
+			"BoxSetCount":     0,
+			"AlbumCount":      0,
+			"SongCount":       0,
+			"MusicVideoCount": 0,
+			"BookCount":       0,
+			"ProgramCount":    0,
+			"TrailerCount":    0,
+			"GameCount":       0,
+			"ArtistCount":     0,
+			"GameSystemCount": 0,
+			"ItemCount":       0,
 		}
 
 		for _, item := range items {
-			switch item.Type {
-			case "Movie":
-				counts["Movies"] = counts["Movies"].(int) + 1
-			case "Series":
-				counts["Series"] = counts["Series"].(int) + 1
-			case "Episode":
-				counts["Episodes"] = counts["Episodes"].(int) + 1
-			case "Season":
-				counts["Seasons"] = counts["Seasons"].(int) + 1
+			key := item.Type + "Count"
+			if current, ok := counts[key]; ok {
+				counts[key] = current.(int) + 1
 			}
 		}
 
@@ -301,18 +458,33 @@ func getItemCounts(mediaSvc *service.MediaService) gin.HandlerFunc {
 
 // 创建媒体项目（管理 API）
 type CreateItemRequest struct {
-	LibraryID string `json:"LibraryId"`
-	Name      string `json:"Name"`
-	Type      string `json:"Type"` // Movie, Series, Season, Episode
-	Overview  string `json:"Overview"`
-	Year      *int   `json:"Year"`
-	Genres    []string `json:"Genres"`
+	LibraryID       string   `json:"LibraryId"`
+	ParentID        string   `json:"ParentId"`
+	Name            string   `json:"Name"`
+	Type            string   `json:"Type"` // Movie, Series, Season, Episode, Folder
+	Overview        string   `json:"Overview"`
+	Year            *int     `json:"Year"`
+	Genres          []string `json:"Genres"`
+	Studios         []string `json:"Studios"`
+	Tags            []string `json:"Tags"`
+	Taglines        []string `json:"Taglines"`
+	People          []map[string]interface{} `json:"People"`
+	PremiereDate    *string  `json:"PremiereDate"`
+	OfficialRating  string   `json:"OfficialRating"`
+	CommunityRating *float64 `json:"CommunityRating"`
+	RuntimeTicks    *int64   `json:"RuntimeTicks"`
+	SeasonNumber    *int     `json:"SeasonNumber"`
+	EpisodeNumber   *int     `json:"EpisodeNumber"`
+	CollectionType  string   `json:"CollectionType"`
+	IsHidden        bool     `json:"IsHidden"`
 }
 
 func RegisterAdminItemRoutes(router *gin.Engine) {
 	router.POST("/api/admin/items", createItem())
 	router.PUT("/api/admin/items/:itemId", updateItem())
 	router.DELETE("/api/admin/items/:itemId", deleteItem())
+	router.POST("/api/admin/items/:itemId/sources", addSource())
+	router.DELETE("/api/admin/items/:itemId/sources/:sourceId", deleteSource())
 }
 
 func createItem() gin.HandlerFunc {
@@ -325,18 +497,62 @@ func createItem() gin.HandlerFunc {
 
 		// 创建媒体项目
 		item := &database.MediaItem{
-			ID:        uuid.New().String(),
-			LibraryID: req.LibraryID,
-			Type:      req.Type,
-			Name:      req.Name,
-			Overview:  req.Overview,
-			Year:      req.Year,
+			ID:              newShortID(),
+			LibraryID:       req.LibraryID,
+			Type:            req.Type,
+			Name:            req.Name,
+			Overview:        req.Overview,
+			Year:            req.Year,
+			OfficialRating:  req.OfficialRating,
+			CommunityRating: req.CommunityRating,
+			RuntimeTicks:    req.RuntimeTicks,
+			SeasonNumber:    req.SeasonNumber,
+			EpisodeNumber:   req.EpisodeNumber,
+			IsHidden:        req.IsHidden,
+		}
+
+		// 设置 ParentId
+		if req.ParentID != "" {
+			item.ParentID = &req.ParentID
+		}
+
+		// 标准化 PremiereDate
+		if req.PremiereDate != nil && *req.PremiereDate != "" {
+			d := *req.PremiereDate
+			if len(d) == 10 && d[4] == '-' && d[7] == '-' {
+				d = d + "T00:00:00Z"
+			}
+			item.PremiereDate = &d
 		}
 
 		// 保存 genres 为 JSON
 		if len(req.Genres) > 0 {
 			genresJSON, _ := json.Marshal(req.Genres)
 			item.Genres = string(genresJSON)
+		}
+
+		// 保存 studios 为 JSON
+		if len(req.Studios) > 0 {
+			studiosJSON, _ := json.Marshal(req.Studios)
+			item.Studios = string(studiosJSON)
+		}
+
+		// 保存 tags 为 JSON
+		if len(req.Tags) > 0 {
+			tagsJSON, _ := json.Marshal(req.Tags)
+			item.Tags = string(tagsJSON)
+		}
+
+		// 保存 taglines 为 JSON
+		if len(req.Taglines) > 0 {
+			taglinesJSON, _ := json.Marshal(req.Taglines)
+			item.Taglines = string(taglinesJSON)
+		}
+
+		// 保存 people 为 JSON
+		if len(req.People) > 0 {
+			peopleJSON, _ := json.Marshal(req.People)
+			item.People = string(peopleJSON)
 		}
 
 		if err := database.Get().Create(item).Error; err != nil {
@@ -389,5 +605,104 @@ func deleteItem() gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, gin.H{"message": "Item deleted"})
+	}
+}
+
+type AddSourceRequest struct {
+	Name      string `json:"Name"`
+	URL       string `json:"URL"`
+	Container string `json:"Container"`
+	Bitrate   *int   `json:"Bitrate"`
+	Width     *int   `json:"Width"`
+	Height    *int   `json:"Height"`
+}
+
+func addSource() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		itemID := c.Param("itemId")
+
+		var req AddSourceRequest
+		if err := c.BindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, ErrBadRequest)
+			return
+		}
+
+		source := &database.MediaSource{
+			ID:        newShortID(),
+			ItemID:    itemID,
+			Name:      req.Name,
+			URL:       req.URL,
+			Protocol:  "Http",
+			Container: req.Container,
+			Bitrate:   req.Bitrate,
+		}
+
+		if err := database.Get().Create(source).Error; err != nil {
+			slog.Error("添加媒体源失败", "error", err)
+			c.JSON(http.StatusInternalServerError, ErrInternal)
+			return
+		}
+
+		c.JSON(http.StatusCreated, source)
+	}
+}
+
+func deleteSource() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		sourceID := c.Param("sourceId")
+
+		if err := database.Get().Where("id = ?", sourceID).Delete(&database.MediaSource{}).Error; err != nil {
+			slog.Error("删除媒体源失败", "error", err)
+			c.JSON(http.StatusInternalServerError, ErrInternal)
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "Source deleted"})
+	}
+}
+
+// getPersons 返回演员列表（目前返回空列表，满足客户端请求）
+func getPersons() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.JSON(http.StatusOK, types.ItemsResponse{
+			Items:            []types.BaseItemDto{},
+			TotalRecordCount: 0,
+		})
+	}
+}
+
+// getResume 返回继续观看列表
+func getResume(mediaSvc *service.MediaService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID := c.GetString("user_id")
+		paramUserID := c.Param("userId")
+		if paramUserID != "" {
+			userID = paramUserID
+		}
+
+		limit, _ := strconv.Atoi(c.DefaultQuery("Limit", "20"))
+
+		// 查询有播放进度但未播完的项目
+		var progresses []database.PlayProgress
+		database.Get().Where("user_id = ? AND position_ticks > 0 AND played = ?", userID, false).
+			Order("updated_at DESC").
+			Limit(limit).
+			Find(&progresses)
+
+		includeFields := []string{"*"}
+		items := make([]types.BaseItemDto, 0, len(progresses))
+		for _, p := range progresses {
+			item, err := mediaSvc.GetItemByID(p.ItemID)
+			if err != nil {
+				continue
+			}
+			dto := mediaSvc.ItemToDTO(item, userID, includeFields)
+			items = append(items, *dto)
+		}
+
+		c.JSON(http.StatusOK, types.ItemsResponse{
+			Items:            items,
+			TotalRecordCount: len(items),
+		})
 	}
 }

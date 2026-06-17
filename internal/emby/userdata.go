@@ -15,29 +15,31 @@ func RegisterUserDataRoutes(router *gin.Engine) {
 	mediaSvc := service.NewMediaService(database.Get())
 
 	// 标记已看
-	router.POST("/emby/Users/:userId/PlayedItems/:itemId", AuthTokenMiddleware(30), markAsPlayed(playSvc))
+	router.POST("/emby/Users/:userId/PlayedItems/:itemId", AuthTokenMiddleware(30), markAsPlayed(playSvc, mediaSvc))
 
 	// 取消已看
-	router.DELETE("/emby/Users/:userId/PlayedItems/:itemId", AuthTokenMiddleware(30), unmarkAsPlayed(playSvc))
+	router.DELETE("/emby/Users/:userId/PlayedItems/:itemId", AuthTokenMiddleware(30), unmarkAsPlayed(playSvc, mediaSvc))
 
 	// 收藏
-	router.POST("/emby/Users/:userId/FavoriteItems/:itemId", AuthTokenMiddleware(30), markAsFavorite(playSvc))
+	router.POST("/emby/Users/:userId/FavoriteItems/:itemId", AuthTokenMiddleware(30), markAsFavorite(playSvc, mediaSvc))
 
 	// 取消收藏
-	router.DELETE("/emby/Users/:userId/FavoriteItems/:itemId", AuthTokenMiddleware(30), unmarkAsFavorite(playSvc))
+	router.DELETE("/emby/Users/:userId/FavoriteItems/:itemId", AuthTokenMiddleware(30), unmarkAsFavorite(playSvc, mediaSvc))
 
 	// 继续观看列表
 	router.GET("/emby/Users/:userId/Items/Resume", AuthTokenMiddleware(30), getResumeItems(playSvc, mediaSvc))
+	router.GET("/emby/users/:userId/items/resume", AuthTokenMiddleware(30), getResumeItems(playSvc, mediaSvc))
 }
 
-func markAsPlayed(playSvc *service.PlaybackService) gin.HandlerFunc {
+func markAsPlayed(playSvc *service.PlaybackService, mediaSvc *service.MediaService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.Param("userId")
 		itemID := c.Param("itemId")
 
 		// 验证用户是否与 token 匹配
 		tokenUserID := c.GetString("user_id")
-		if tokenUserID != userID {
+		isAdmin, _ := c.Get("is_admin")
+		if tokenUserID != userID && (isAdmin == nil || !isAdmin.(bool)) {
 			c.JSON(http.StatusForbidden, ErrForbidden)
 			return
 		}
@@ -49,18 +51,26 @@ func markAsPlayed(playSvc *service.PlaybackService) gin.HandlerFunc {
 		}
 
 		slog.Info("标记已看", "user_id", userID, "item_id", itemID)
-		c.Status(http.StatusNoContent)
+		
+		item, err := mediaSvc.GetItemByID(itemID)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{})
+			return
+		}
+		dto := mediaSvc.ItemToDTO(item, userID, nil)
+		c.JSON(http.StatusOK, dto.UserData)
 	}
 }
 
-func unmarkAsPlayed(playSvc *service.PlaybackService) gin.HandlerFunc {
+func unmarkAsPlayed(playSvc *service.PlaybackService, mediaSvc *service.MediaService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.Param("userId")
 		itemID := c.Param("itemId")
 
 		// 验证用户
 		tokenUserID := c.GetString("user_id")
-		if tokenUserID != userID {
+		isAdmin, _ := c.Get("is_admin")
+		if tokenUserID != userID && (isAdmin == nil || !isAdmin.(bool)) {
 			c.JSON(http.StatusForbidden, ErrForbidden)
 			return
 		}
@@ -72,18 +82,26 @@ func unmarkAsPlayed(playSvc *service.PlaybackService) gin.HandlerFunc {
 		}
 
 		slog.Info("取消已看", "user_id", userID, "item_id", itemID)
-		c.Status(http.StatusNoContent)
+
+		item, err := mediaSvc.GetItemByID(itemID)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{})
+			return
+		}
+		dto := mediaSvc.ItemToDTO(item, userID, nil)
+		c.JSON(http.StatusOK, dto.UserData)
 	}
 }
 
-func markAsFavorite(playSvc *service.PlaybackService) gin.HandlerFunc {
+func markAsFavorite(playSvc *service.PlaybackService, mediaSvc *service.MediaService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.Param("userId")
 		itemID := c.Param("itemId")
 
 		// 验证用户
 		tokenUserID := c.GetString("user_id")
-		if tokenUserID != userID {
+		isAdmin, _ := c.Get("is_admin")
+		if tokenUserID != userID && (isAdmin == nil || !isAdmin.(bool)) {
 			c.JSON(http.StatusForbidden, ErrForbidden)
 			return
 		}
@@ -95,18 +113,26 @@ func markAsFavorite(playSvc *service.PlaybackService) gin.HandlerFunc {
 		}
 
 		slog.Info("收藏", "user_id", userID, "item_id", itemID)
-		c.Status(http.StatusNoContent)
+		
+		item, err := mediaSvc.GetItemByID(itemID)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{})
+			return
+		}
+		dto := mediaSvc.ItemToDTO(item, userID, nil)
+		c.JSON(http.StatusOK, dto.UserData)
 	}
 }
 
-func unmarkAsFavorite(playSvc *service.PlaybackService) gin.HandlerFunc {
+func unmarkAsFavorite(playSvc *service.PlaybackService, mediaSvc *service.MediaService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.Param("userId")
 		itemID := c.Param("itemId")
 
 		// 验证用户
 		tokenUserID := c.GetString("user_id")
-		if tokenUserID != userID {
+		isAdmin, _ := c.Get("is_admin")
+		if tokenUserID != userID && (isAdmin == nil || !isAdmin.(bool)) {
 			c.JSON(http.StatusForbidden, ErrForbidden)
 			return
 		}
@@ -118,7 +144,14 @@ func unmarkAsFavorite(playSvc *service.PlaybackService) gin.HandlerFunc {
 		}
 
 		slog.Info("取消收藏", "user_id", userID, "item_id", itemID)
-		c.Status(http.StatusNoContent)
+		
+		item, err := mediaSvc.GetItemByID(itemID)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{})
+			return
+		}
+		dto := mediaSvc.ItemToDTO(item, userID, nil)
+		c.JSON(http.StatusOK, dto.UserData)
 	}
 }
 
@@ -128,7 +161,8 @@ func getResumeItems(playSvc *service.PlaybackService, mediaSvc *service.MediaSer
 
 		// 验证用户
 		tokenUserID := c.GetString("user_id")
-		if tokenUserID != userID {
+		isAdmin, _ := c.Get("is_admin")
+		if tokenUserID != userID && (isAdmin == nil || !isAdmin.(bool)) {
 			c.JSON(http.StatusForbidden, ErrForbidden)
 			return
 		}

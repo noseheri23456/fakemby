@@ -14,8 +14,8 @@ import (
 )
 
 type ImageService struct {
-	db    *gorm.DB
-	mode  string // "redirect" or "proxy_cache"
+	db       *gorm.DB
+	mode     string // "redirect" or "proxy_cache"
 	cacheDir string
 }
 

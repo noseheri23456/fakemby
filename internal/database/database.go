@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/glebarez/sqlite"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -72,6 +72,7 @@ func autoMigrate(d *gorm.DB) error {
 		&User{},
 		&PlayProgress{},
 		&Token{},
+		&PlaybackActivity{},
 	)
 }
 

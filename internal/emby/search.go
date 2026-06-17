@@ -13,20 +13,21 @@ import (
 )
 
 type SearchHintsRequest struct {
-	SearchTerm string `form:"SearchTerm"`
-	StartIndex int    `form:"StartIndex"`
-	Limit      int    `form:"Limit"`
+	SearchTerm       string `form:"SearchTerm"`
+	StartIndex       int    `form:"StartIndex"`
+	Limit            int    `form:"Limit"`
 	IncludeItemTypes string `form:"IncludeItemTypes"`
 }
 
 type SearchHintsResponse struct {
-	SearchHints []types.SearchHintDto `json:"SearchHints"`
-	TotalRecordCount int64 `json:"TotalRecordCount"`
+	SearchHints      []types.SearchHintDto `json:"SearchHints"`
+	TotalRecordCount int64                 `json:"TotalRecordCount"`
 }
 
 func RegisterSearchRoutes(router *gin.Engine) {
 	router.GET("/emby/Search/Hints", AuthTokenMiddleware(30), searchHints())
 	router.GET("/emby/Items/:itemId/Similar", AuthTokenMiddleware(30), getSimilarItems())
+	router.GET("/emby/items/:itemId/similar", AuthTokenMiddleware(30), getSimilarItems())
 }
 
 func searchHints() gin.HandlerFunc {
@@ -65,24 +66,49 @@ func searchHints() gin.HandlerFunc {
 		hints := make([]types.SearchHintDto, 0, len(items))
 		for _, item := range items {
 			hint := types.SearchHintDto{
-				Name: item.Name,
-				IndexNumber: item.EpisodeNumber,
+				ItemId:            item.ID,
+				Id:                item.ID,
+				Name:              item.Name,
+				Type:              item.Type,
+				MediaType:         "Video",
+				ProductionYear:    item.Year,
+				RunTimeTicks:      item.RuntimeTicks,
+				IndexNumber:       item.EpisodeNumber,
 				ParentIndexNumber: item.SeasonNumber,
-				Id: item.ID,
-				Type: item.Type,
+			}
+
+			// 设置 SeriesName
+			if item.Type == "Episode" && item.ParentID != nil {
+				var season database.MediaItem
+				if err := db.Where("id = ?", *item.ParentID).First(&season).Error; err == nil && season.ParentID != nil {
+					var series database.MediaItem
+					if err := db.Where("id = ?", *season.ParentID).First(&series).Error; err == nil {
+						hint.SeriesName = series.Name
+					}
+				}
 			}
 
 			// 获取图片 tag
-			var image database.Image
-			if err := db.Where("item_id = ? AND type = ?", item.ID, "Primary").First(&image).Error; err == nil {
-				hint.PrimaryImageTag = image.Tag
+			var images []database.Image
+			db.Where("item_id = ?", item.ID).Find(&images)
+			for _, img := range images {
+				if img.Type == "Primary" && hint.PrimaryImageTag == "" {
+					hint.PrimaryImageTag = img.Tag
+				} else if img.Type == "Thumb" && hint.ThumbImageTag == "" {
+					hint.ThumbImageTag = img.Tag
+				} else if img.Type == "Backdrop" && img.Tag != "" {
+					if hint.BackdropImageTags == nil {
+						hint.BackdropImageTags = []string{}
+					}
+					hint.BackdropImageTags = append(hint.BackdropImageTags, img.Tag)
+				}
 			}
 
 			hints = append(hints, hint)
 		}
 
 		response := SearchHintsResponse{
-			SearchHints: hints,
+			SearchHints:      hints,
 			TotalRecordCount: total,
 		}
 
@@ -129,7 +155,7 @@ func getSimilarItems() gin.HandlerFunc {
 		}
 
 		response := gin.H{
-			"Items": items,
+			"Items":            items,
 			"TotalRecordCount": int64(len(items)),
 		}
 

@@ -2,7 +2,6 @@ package database
 
 import (
 	"time"
-	"gorm.io/gorm"
 )
 
 // Library 媒体库
@@ -32,6 +31,7 @@ type MediaItem struct {
 	People          string `gorm:"type:text"` // JSON array
 	Tags            string `gorm:"type:text"` // JSON array
 	Taglines        string `gorm:"type:text"` // JSON array
+	ExternalUrls    string `gorm:"type:text"` // JSON array of {Name, Url}
 	ProviderIds     string `gorm:"type:text"` // JSON
 	TMDBID          string
 	IMDBID          string
@@ -39,6 +39,7 @@ type MediaItem struct {
 	SeasonNumber    *int
 	EpisodeNumber   *int
 	RuntimeTicks    *int64
+	IsHidden        bool
 	Container       string
 	VideoCodec      string
 	AudioCodec      string
@@ -63,14 +64,14 @@ type MediaSource struct {
 
 // Image 图片
 type Image struct {
-	ID       uint
-	ItemID   string `gorm:"index"`
-	Type     string // Primary, Backdrop, Logo, Thumb, Banner, Art
-	Idx      int    // 多图索引
-	URL      string `gorm:"type:text"`
-	Tag      string // MD5 前8位
-	Width    *int
-	Height   *int
+	ID     uint
+	ItemID string `gorm:"index"`
+	Type   string // Primary, Backdrop, Logo, Thumb, Banner, Art
+	Idx    int    // 多图索引
+	URL    string `gorm:"type:text"`
+	Tag    string // MD5 前8位
+	Width  *int
+	Height *int
 }
 
 // Subtitle 字幕
@@ -85,27 +86,25 @@ type Subtitle struct {
 
 // User 用户
 type User struct {
-	ID            string `gorm:"primaryKey"`
-	Name          string `gorm:"uniqueIndex"`
-	PasswordHash  string
-	IsAdmin       bool
-	Policy        string `gorm:"type:text"` // JSON
-	ImageURL      string
-	DateCreated   time.Time `gorm:"autoCreateTime:milli"`
+	ID                string `gorm:"primaryKey"`
+	Name              string `gorm:"uniqueIndex"`
+	PasswordHash      string
+	IsAdmin           bool
+	AllowRemoteAccess bool
+	Policy            string `gorm:"type:text"` // JSON
+	ImageURL          string
+	DateCreated       time.Time `gorm:"autoCreateTime:milli"`
 }
 
 // PlayProgress 播放进度
 type PlayProgress struct {
-	UserID       string
-	ItemID       string
+	UserID        string `gorm:"primaryKey"`
+	ItemID        string `gorm:"primaryKey"`
 	PositionTicks int64
-	PlayCount    int
-	IsPlayed     bool
-	IsFavorite   bool
-	LastPlayed   *time.Time
-
-	// 复合主键
-	ID uint `gorm:"primaryKey"`
+	PlayCount     int
+	IsPlayed      bool
+	IsFavorite    bool
+	LastPlayed    *time.Time
 }
 
 // Token 认证令牌
@@ -119,21 +118,31 @@ type Token struct {
 	CreatedAt  time.Time `gorm:"autoCreateTime:milli;index"`
 }
 
-// TableName 定义自定义表名
-func (Library) TableName() string { return "libraries" }
-func (MediaItem) TableName() string { return "media_items" }
-func (MediaSource) TableName() string { return "media_sources" }
-func (Image) TableName() string { return "images" }
-func (Subtitle) TableName() string { return "subtitles" }
-func (User) TableName() string { return "users" }
-func (PlayProgress) TableName() string { return "play_progress" }
-func (Token) TableName() string { return "tokens" }
-
-// BeforeSave hook 用于设置复合主键
-func (p *PlayProgress) BeforeSave(tx *gorm.DB) error {
-	// 设置唯一标识
-	return nil
+// PlaybackActivity 播放活动 (供 Emby 统计插件兼容)
+type PlaybackActivity struct {
+	ID             uint      `gorm:"primaryKey;autoIncrement"`
+	DateCreated    time.Time `gorm:"autoCreateTime"`
+	UserID         string    `gorm:"column:UserId;index"`
+	ItemID         string    `gorm:"column:ItemId;index"`
+	ItemType       string    `gorm:"column:ItemType;index"`
+	ItemName       string    `gorm:"column:ItemName"`
+	PlayDuration   int       `gorm:"column:PlayDuration"`
+	PauseDuration  int       `gorm:"column:PauseDuration"`
+	ClientName     string    `gorm:"column:ClientName"`
+	DeviceName     string    `gorm:"column:DeviceName"`
+	DeviceID       string    `gorm:"column:DeviceId"`
+	RemoteAddress  string    `gorm:"column:RemoteAddress"`
 }
+
+func (Library) TableName() string      { return "libraries" }
+func (MediaItem) TableName() string    { return "media_items" }
+func (MediaSource) TableName() string  { return "media_sources" }
+func (Image) TableName() string        { return "images" }
+func (Subtitle) TableName() string     { return "subtitles" }
+func (User) TableName() string         { return "users" }
+func (PlayProgress) TableName() string { return "play_progress" }
+func (Token) TableName() string        { return "tokens" }
+func (PlaybackActivity) TableName() string { return "PlaybackActivity" }
 
 // GetUsableToken 返回有效的 Token（不包括过期的）
 func (t *Token) GetUsableToken(expiryDays int) bool {
