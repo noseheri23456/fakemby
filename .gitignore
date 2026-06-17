@@ -1,0 +1,7 @@
+.claude/
+.playwright-mcp/
+fakemby.exe
+build_test.exe
+fakemby.db
+fakemby.db-shm
+fakemby.db-wal
