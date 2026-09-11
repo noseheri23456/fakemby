@@ -1,0 +1,100 @@
+{
+  "Name": "沙丘",
+  "ServerId": "fakemby-test",
+  "Id": "item-movie",
+  "Type": "Movie",
+  "IsFolder": false,
+  "MediaType": "Video",
+  "Etag": "fixed-etag",
+  "Overview": "沙漠星球上的权力斗争",
+  "OriginalTitle": "Dune",
+  "SortName": "沙丘",
+  "ForcedSortName": "沙丘",
+  "Container": "mkv",
+  "RunTimeTicks": 55800000000,
+  "PremiereDate": "2021-10-22T00:00:00Z",
+  "ProductionYear": 2021,
+  "CommunityRating": 7.8,
+  "OfficialRating": "PG-13",
+  "CanDelete": true,
+  "CanDownload": true,
+  "SupportsSync": true,
+  "LockData": false,
+  "LockedFields": [],
+  "GenreItems": [
+    {
+      "Name": "科幻",
+      "Id": "7fcdd6b9e65230eb2176c243f6833013"
+    },
+    {
+      "Name": "冒险",
+      "Id": "3b6305f0c84ceba7940c34a85953b8c9"
+    }
+  ],
+  "Genres": [
+    "科幻",
+    "冒险"
+  ],
+  "Studios": [
+    {
+      "Name": "Legendary Pictures",
+      "Id": "21b325014899ce477e5f022a4bffeb19"
+    }
+  ],
+  "Tags": [
+    "科幻"
+  ],
+  "ImageTags": {
+    "Primary": "abcd1234"
+  },
+  "BackdropImageTags": [
+    "bg000001"
+  ],
+  "PrimaryImageAspectRatio": 0.6666666666666666,
+  "UserData": {
+    "PlaybackPositionTicks": 55800000000,
+    "PlayCount": 1,
+    "Played": true,
+    "IsFavorite": true,
+    "LastPlayedDate": "2024-01-01T00:00:00Z",
+    "Key": "item-movie",
+    "ItemId": "item-movie",
+    "PlayedPercentage": 100
+  },
+  "MediaSources": [
+    {
+      "Id": "src-movie",
+      "Name": "沙丘-1080p",
+      "Path": "https://cdn.example.com/movies/dune.mkv",
+      "Protocol": "Http",
+      "Type": "Default",
+      "Container": "mkv",
+      "Size": 4294967296,
+      "Bitrate": 8000000,
+      "RunTimeTicks": 55800000000,
+      "IsRemote": true,
+      "HasMixedProtocols": false,
+      "SupportsTranscoding": false,
+      "SupportsDirectStream": true,
+      "SupportsDirectPlay": true,
+      "IsInfiniteStream": false,
+      "RequiresOpening": false,
+      "RequiresClosing": false,
+      "RequiresLooping": false,
+      "SupportsProbing": true,
+      "MediaStreams": [],
+      "ReadAtNativeFramerate": false,
+      "DirectStreamUrl": "/emby/Videos/\u003cid\u003e/stream?Static=true\u0026mediaSourceId=\u003csrc\u003e"
+    }
+  ],
+  "ProviderIds": {
+    "Tmdb": "438631"
+  },
+  "RemoteTrailers": [],
+  "DateCreated": "2024-01-01T00:00:00Z",
+  "DateModified": "2024-01-01T00:00:00Z",
+  "PresentationUniqueKey": "item-movie",
+  "DisplayPreferencesId": "item-movie",
+  "IsHidden": false,
+  "ExternalUrls": []
+}

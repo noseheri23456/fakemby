@@ -1,0 +1,73 @@
+{
+  "Name": "第 1 集",
+  "ServerId": "fakemby-test",
+  "Id": "item-episode",
+  "Type": "Episode",
+  "IsFolder": false,
+  "MediaType": "Video",
+  "Etag": "fixed-etag",
+  "Container": "mkv",
+  "RunTimeTicks": 55800000000,
+  "CanDelete": true,
+  "CanDownload": true,
+  "SupportsSync": true,
+  "LockData": false,
+  "LockedFields": [],
+  "ParentId": "item-season",
+  "ParentIndexNumber": 1,
+  "IndexNumber": 1,
+  "SeriesId": "item-series",
+  "SeriesName": "西部世界",
+  "ImageTags": {
+    "Primary": "ww123456"
+  },
+  "BackdropImageTags": [
+    "bgww0001"
+  ],
+  "PrimaryImageAspectRatio": 1.7777777777777777,
+  "ParentBackdropItemId": "item-series",
+  "UserData": {
+    "PlaybackPositionTicks": 27900000000,
+    "PlayCount": 0,
+    "Played": false,
+    "IsFavorite": false,
+    "LastPlayedDate": "2024-01-01T00:00:00Z",
+    "Key": "item-episode",
+    "ItemId": "item-episode",
+    "PlayedPercentage": 50
+  },
+  "MediaSources": [
+    {
+      "Id": "src-episode",
+      "Name": "西部世界-S01E01",
+      "Path": "https://openlist.example.com/d/ep1.mkv",
+      "Protocol": "Http",
+      "Type": "Default",
+      "Container": "mkv",
+      "Size": 4294967296,
+      "Bitrate": 8000000,
+      "RunTimeTicks": 55800000000,
+      "IsRemote": true,
+      "HasMixedProtocols": false,
+      "SupportsTranscoding": false,
+      "SupportsDirectStream": true,
+      "SupportsDirectPlay": true,
+      "IsInfiniteStream": false,
+      "RequiresOpening": false,
+      "RequiresClosing": false,
+      "RequiresLooping": false,
+      "SupportsProbing": true,
+      "MediaStreams": [],
+      "ReadAtNativeFramerate": false,
+      "DirectStreamUrl": "/emby/Videos/\u003cid\u003e/stream?Static=true\u0026mediaSourceId=\u003csrc\u003e"
+    }
+  ],
+  "ProviderIds": {},
+  "RemoteTrailers": [],
+  "DateCreated": "2024-01-01T00:00:00Z",
+  "DateModified": "2024-01-01T00:00:00Z",
+  "PresentationUniqueKey": "item-episode",
+  "DisplayPreferencesId": "item-episode",
+  "IsHidden": false,
+  "ExternalUrls": []
+}

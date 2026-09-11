@@ -1,0 +1,57 @@
+{
+  "Name": "西部世界",
+  "ServerId": "fakemby-test",
+  "Id": "item-series",
+  "Type": "Series",
+  "IsFolder": true,
+  "MediaType": "Video",
+  "Etag": "fixed-etag",
+  "Overview": "AI 主题公园",
+  "SortName": "西部世界",
+  "ForcedSortName": "西部世界",
+  "ProductionYear": 2021,
+  "CanDelete": true,
+  "CanDownload": true,
+  "SupportsSync": true,
+  "LockData": false,
+  "LockedFields": [],
+  "SeasonCount": 1,
+  "GenreItems": [
+    {
+      "Name": "科幻",
+      "Id": "7fcdd6b9e65230eb2176c243f6833013"
+    },
+    {
+      "Name": "剧情",
+      "Id": "0ff9efb796c9193efa7c6d44eb9a48bc"
+    }
+  ],
+  "Genres": [
+    "科幻",
+    "剧情"
+  ],
+  "ImageTags": {
+    "Primary": "ww123456"
+  },
+  "BackdropImageTags": [
+    "bgww0001"
+  ],
+  "PrimaryImageAspectRatio": 0.6666666666666666,
+  "UserData": {
+    "PlaybackPositionTicks": 0,
+    "PlayCount": 0,
+    "Played": false,
+    "IsFavorite": false,
+    "Key": "item-series",
+    "ItemId": "item-series"
+  },
+  "MediaSources": [],
+  "ProviderIds": {},
+  "RemoteTrailers": [],
+  "DateCreated": "2024-01-01T00:00:00Z",
+  "DateModified": "2024-01-01T00:00:00Z",
+  "PresentationUniqueKey": "item-series",
+  "DisplayPreferencesId": "item-series",
+  "IsHidden": false,
+  "ExternalUrls": []
+}
