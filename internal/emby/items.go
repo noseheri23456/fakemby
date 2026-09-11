@@ -8,14 +8,14 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/fakemby/fakemby/internal/database"
 	"github.com/fakemby/fakemby/internal/config"
+	"github.com/fakemby/fakemby/internal/database"
 	"github.com/fakemby/fakemby/internal/service"
 	"github.com/fakemby/fakemby/internal/types"
 	"github.com/gin-gonic/gin"
 )
 
-func RegisterItemRoutes(router *gin.Engine) {
+func RegisterItemRoutes(router *gin.Engine, cfg *config.Config) {
 	mediaSvc := service.NewMediaService(database.Get())
 
 	viewsHandler := getViews(mediaSvc)
@@ -24,24 +24,26 @@ func RegisterItemRoutes(router *gin.Engine) {
 	itemHandler := getItem(mediaSvc)
 	latestHandler := getLatest(mediaSvc)
 	countsHandler := getItemCounts(mediaSvc)
-	authMiddleware := AuthTokenMiddleware(30)
+	authMiddleware := AuthTokenMiddleware(cfg.Auth.TokenExpiryDays)
+	// M0-5：读侧归属校验，:userId 必须是本人或管理员
+	ownerMiddleware := RequireUserMatch("userId")
 
 	// 媒体库视图
-	router.GET("/emby/Users/:userId/Views", authMiddleware, viewsHandler)
-	router.GET("/emby/users/:userId/views", authMiddleware, viewsHandler) // 小写版本
+	router.GET("/emby/Users/:userId/Views", authMiddleware, ownerMiddleware, viewsHandler)
+	router.GET("/emby/users/:userId/views", authMiddleware, ownerMiddleware, viewsHandler) // 小写版本
 
 	// 媒体库文件夹（浏览文件夹层级）
-	router.GET("/emby/Users/:userId/Folders", authMiddleware, foldersHandler)
-	router.GET("/emby/users/:userId/folders", authMiddleware, foldersHandler) // 小写版本
+	router.GET("/emby/Users/:userId/Folders", authMiddleware, ownerMiddleware, foldersHandler)
+	router.GET("/emby/users/:userId/folders", authMiddleware, ownerMiddleware, foldersHandler) // 小写版本
 
 	// 媒体列表
-	router.GET("/emby/Users/:userId/Items", authMiddleware, itemsHandler)
-	router.GET("/emby/users/:userId/items", authMiddleware, itemsHandler) // 小写版本
+	router.GET("/emby/Users/:userId/Items", authMiddleware, ownerMiddleware, itemsHandler)
+	router.GET("/emby/users/:userId/items", authMiddleware, ownerMiddleware, itemsHandler) // 小写版本
 
 	// 媒体详情
-	router.GET("/emby/Users/:userId/Items/:itemId", authMiddleware, itemHandler)
-	router.GET("/emby/users/:userId/items/:itemId", authMiddleware, itemHandler) // 小写版本
-	
+	router.GET("/emby/Users/:userId/Items/:itemId", authMiddleware, ownerMiddleware, itemHandler)
+	router.GET("/emby/users/:userId/items/:itemId", authMiddleware, ownerMiddleware, itemHandler) // 小写版本
+
 	// 虚拟文件夹 (Sakura_embyboss 依赖)
 	router.GET("/emby/Library/VirtualFolders", authMiddleware, getVirtualFolders(mediaSvc))
 
@@ -53,8 +55,8 @@ func RegisterItemRoutes(router *gin.Engine) {
 	router.GET("/emby/items/:itemId/ancestors", authMiddleware, getAncestors(mediaSvc))
 
 	// 最新添加
-	router.GET("/emby/Users/:userId/Items/Latest", authMiddleware, latestHandler)
-	router.GET("/emby/users/:userId/items/latest", authMiddleware, latestHandler) // 小写版本
+	router.GET("/emby/Users/:userId/Items/Latest", authMiddleware, ownerMiddleware, latestHandler)
+	router.GET("/emby/users/:userId/items/latest", authMiddleware, ownerMiddleware, latestHandler) // 小写版本
 
 	// 媒体计数（RodelPlayer 需要这个端点来显示库统计）
 	router.GET("/emby/Items/Counts", authMiddleware, countsHandler)
@@ -93,40 +95,40 @@ func getViews(mediaSvc *service.MediaService) gin.HandlerFunc {
 			subviews := []string{lib.Type, "tags", "genres", "folders"}
 			now := time.Now().UTC().Format(time.RFC3339Nano)
 			dto := types.BaseItemDto{
-				ID:                    lib.ID,
-				Name:                  lib.Name,
-				Guid:                  lib.ID,
-				Etag:                  fmt.Sprintf("%032x", time.Now().UnixNano()),
-				Type:                  "CollectionFolder",
-				IsFolder:              true,
-				CollectionType:        lib.Type,
-				SortName:              lib.Name,
-				ForcedSortName:        lib.Name,
-				ServerID:              cfg.Server.ID,
-				CanDelete:             false,
-				CanDownload:           false,
-				SupportsSync:          true,
-				LockData:              false,
-				ParentID:              "2",
-				Subviews:              subviews,
-				DateCreated:           now,
-				DateModified:          now,
+				ID:                      lib.ID,
+				Name:                    lib.Name,
+				Guid:                    lib.ID,
+				Etag:                    fmt.Sprintf("%032x", time.Now().UnixNano()),
+				Type:                    "CollectionFolder",
+				IsFolder:                true,
+				CollectionType:          lib.Type,
+				SortName:                lib.Name,
+				ForcedSortName:          lib.Name,
+				ServerID:                cfg.Server.ID,
+				CanDelete:               false,
+				CanDownload:             false,
+				SupportsSync:            true,
+				LockData:                false,
+				ParentID:                "2",
+				Subviews:                subviews,
+				DateCreated:             now,
+				DateModified:            now,
 				PrimaryImageAspectRatio: &ratio,
-				ImageTags:             map[string]string{},
-				BackdropImageTags:     []string{},
-				MediaSources:          []types.MediaSourceDto{},
-				ProviderIds:           map[string]string{},
-				RemoteTrailers:        []types.ExternalUrl{},
-				ExternalUrls:          []types.ExternalUrl{},
-				LockedFields:          []string{},
-				GenreItems:            []types.NameIdPair{},
-				Genres:                []string{},
-				Studios:               []types.NameIdPair{},
-				Tags:                  []string{},
-				Taglines:              []string{},
-				People:                []types.PersonInfo{},
-				PresentationUniqueKey: lib.ID,
-				DisplayPreferencesId:  lib.ID,
+				ImageTags:               map[string]string{},
+				BackdropImageTags:       []string{},
+				MediaSources:            []types.MediaSourceDto{},
+				ProviderIds:             map[string]string{},
+				RemoteTrailers:          []types.ExternalUrl{},
+				ExternalUrls:            []types.ExternalUrl{},
+				LockedFields:            []string{},
+				GenreItems:              []types.NameIdPair{},
+				Genres:                  []string{},
+				Studios:                 []types.NameIdPair{},
+				Tags:                    []string{},
+				Taglines:                []string{},
+				People:                  []types.PersonInfo{},
+				PresentationUniqueKey:   lib.ID,
+				DisplayPreferencesId:    lib.ID,
 				UserData: &types.UserItemDataDto{
 					PlaybackPositionTicks: 0,
 					PlayCount:             0,
@@ -182,41 +184,41 @@ func getFolders(mediaSvc *service.MediaService) gin.HandlerFunc {
 			subviews2 := []string{lib.Type, "tags", "genres", "folders"}
 			now := time.Now().UTC().Format(time.RFC3339Nano)
 			dto := types.BaseItemDto{
-				ID:                    lib.ID,
-				Name:                  lib.Name,
-				Guid:                  lib.ID,
-				Etag:                  fmt.Sprintf("%032x", time.Now().UnixNano()),
-				Type:                  "Folder",
-				IsFolder:              true,
-				CollectionType:        lib.Type,
-				SortName:              lib.Name,
-				ForcedSortName:        lib.Name,
-				ServerID:              cfg.Server.ID,
-				CanDelete:             false,
-				CanDownload:           false,
-				SupportsSync:          true,
-				LockData:              false,
-				ChildCount:            &childCountInt,
-				ParentID:              "2",
-				Subviews:              subviews2,
-				DateCreated:           now,
-				DateModified:          now,
+				ID:                      lib.ID,
+				Name:                    lib.Name,
+				Guid:                    lib.ID,
+				Etag:                    fmt.Sprintf("%032x", time.Now().UnixNano()),
+				Type:                    "Folder",
+				IsFolder:                true,
+				CollectionType:          lib.Type,
+				SortName:                lib.Name,
+				ForcedSortName:          lib.Name,
+				ServerID:                cfg.Server.ID,
+				CanDelete:               false,
+				CanDownload:             false,
+				SupportsSync:            true,
+				LockData:                false,
+				ChildCount:              &childCountInt,
+				ParentID:                "2",
+				Subviews:                subviews2,
+				DateCreated:             now,
+				DateModified:            now,
 				PrimaryImageAspectRatio: &ratio,
-				ImageTags:             map[string]string{},
-				BackdropImageTags:     []string{},
-				MediaSources:          []types.MediaSourceDto{},
-				ProviderIds:           map[string]string{},
-				RemoteTrailers:        []types.ExternalUrl{},
-				ExternalUrls:          []types.ExternalUrl{},
-				LockedFields:          []string{},
-				GenreItems:            []types.NameIdPair{},
-				Genres:                []string{},
-				Studios:               []types.NameIdPair{},
-				Tags:                  []string{},
-				Taglines:              []string{},
-				People:                []types.PersonInfo{},
-				PresentationUniqueKey: lib.ID,
-				DisplayPreferencesId:  lib.ID,
+				ImageTags:               map[string]string{},
+				BackdropImageTags:       []string{},
+				MediaSources:            []types.MediaSourceDto{},
+				ProviderIds:             map[string]string{},
+				RemoteTrailers:          []types.ExternalUrl{},
+				ExternalUrls:            []types.ExternalUrl{},
+				LockedFields:            []string{},
+				GenreItems:              []types.NameIdPair{},
+				Genres:                  []string{},
+				Studios:                 []types.NameIdPair{},
+				Tags:                    []string{},
+				Taglines:                []string{},
+				People:                  []types.PersonInfo{},
+				PresentationUniqueKey:   lib.ID,
+				DisplayPreferencesId:    lib.ID,
 				UserData: &types.UserItemDataDto{
 					PlaybackPositionTicks: 0,
 					PlayCount:             0,
@@ -293,7 +295,7 @@ func getItems(mediaSvc *service.MediaService) gin.HandlerFunc {
 
 		// 解析 Filters（逗号分隔）
 		filters := service.ParseFilters(filtersStr)
-		
+
 		genresFilter := c.Query("Genres")
 		yearsFilter := c.Query("Years")
 		personIdsFilter := c.Query("PersonIds")
@@ -403,7 +405,7 @@ func getAncestors(mediaSvc *service.MediaService) gin.HandlerFunc {
 			if err != nil {
 				break
 			}
-			
+
 			dto := mediaSvc.ItemToDTO(parentItem, userID, nil)
 			ancestors = append(ancestors, dto)
 			currentID = parentItem.ID
@@ -458,33 +460,35 @@ func getItemCounts(mediaSvc *service.MediaService) gin.HandlerFunc {
 
 // 创建媒体项目（管理 API）
 type CreateItemRequest struct {
-	LibraryID       string   `json:"LibraryId"`
-	ParentID        string   `json:"ParentId"`
-	Name            string   `json:"Name"`
-	Type            string   `json:"Type"` // Movie, Series, Season, Episode, Folder
-	Overview        string   `json:"Overview"`
-	Year            *int     `json:"Year"`
-	Genres          []string `json:"Genres"`
-	Studios         []string `json:"Studios"`
-	Tags            []string `json:"Tags"`
-	Taglines        []string `json:"Taglines"`
+	LibraryID       string                   `json:"LibraryId"`
+	ParentID        string                   `json:"ParentId"`
+	Name            string                   `json:"Name"`
+	Type            string                   `json:"Type"` // Movie, Series, Season, Episode, Folder
+	Overview        string                   `json:"Overview"`
+	Year            *int                     `json:"Year"`
+	Genres          []string                 `json:"Genres"`
+	Studios         []string                 `json:"Studios"`
+	Tags            []string                 `json:"Tags"`
+	Taglines        []string                 `json:"Taglines"`
 	People          []map[string]interface{} `json:"People"`
-	PremiereDate    *string  `json:"PremiereDate"`
-	OfficialRating  string   `json:"OfficialRating"`
-	CommunityRating *float64 `json:"CommunityRating"`
-	RuntimeTicks    *int64   `json:"RuntimeTicks"`
-	SeasonNumber    *int     `json:"SeasonNumber"`
-	EpisodeNumber   *int     `json:"EpisodeNumber"`
-	CollectionType  string   `json:"CollectionType"`
-	IsHidden        bool     `json:"IsHidden"`
+	PremiereDate    *string                  `json:"PremiereDate"`
+	OfficialRating  string                   `json:"OfficialRating"`
+	CommunityRating *float64                 `json:"CommunityRating"`
+	RuntimeTicks    *int64                   `json:"RuntimeTicks"`
+	SeasonNumber    *int                     `json:"SeasonNumber"`
+	EpisodeNumber   *int                     `json:"EpisodeNumber"`
+	CollectionType  string                   `json:"CollectionType"`
+	IsHidden        bool                     `json:"IsHidden"`
 }
 
+// RegisterAdminItemRoutes 管理面媒体写接口。
+// M0-2：这五个接口此前完全没有鉴权，任何人都能增删改媒体库；现已统一挂 adminAuth()。
 func RegisterAdminItemRoutes(router *gin.Engine) {
-	router.POST("/api/admin/items", createItem())
-	router.PUT("/api/admin/items/:itemId", updateItem())
-	router.DELETE("/api/admin/items/:itemId", deleteItem())
-	router.POST("/api/admin/items/:itemId/sources", addSource())
-	router.DELETE("/api/admin/items/:itemId/sources/:sourceId", deleteSource())
+	router.POST("/api/admin/items", adminAuth(), createItem())
+	router.PUT("/api/admin/items/:itemId", adminAuth(), updateItem())
+	router.DELETE("/api/admin/items/:itemId", adminAuth(), deleteItem())
+	router.POST("/api/admin/items/:itemId/sources", adminAuth(), addSource())
+	router.DELETE("/api/admin/items/:itemId/sources/:sourceId", adminAuth(), deleteSource())
 }
 
 func createItem() gin.HandlerFunc {

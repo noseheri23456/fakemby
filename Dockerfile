@@ -1,5 +1,5 @@
 # 多阶段编译：Builder 和 Runtime
-FROM golang:1.22-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 # 安装编译依赖
 RUN apk add --no-cache git ca-certificates tzdata

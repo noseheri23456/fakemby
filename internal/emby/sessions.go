@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fakemby/fakemby/internal/config"
 	"github.com/fakemby/fakemby/internal/database"
 	"github.com/fakemby/fakemby/internal/service"
 	"github.com/gin-gonic/gin"
@@ -151,21 +152,23 @@ func ShutdownProgressBuffer() {
 	}
 }
 
-func RegisterSessionRoutes(router *gin.Engine) {
-	router.POST("/emby/Sessions/Playing", AuthTokenMiddleware(30), playingStart())
-	router.POST("/emby/Sessions/Playing/Progress", AuthTokenMiddleware(30), playingProgress())
-	router.POST("/emby/Sessions/Playing/Stopped", AuthTokenMiddleware(30), playingStopped())
-	
+func RegisterSessionRoutes(router *gin.Engine, cfg *config.Config) {
+	auth := AuthTokenMiddleware(cfg.Auth.TokenExpiryDays)
+
+	router.POST("/emby/Sessions/Playing", auth, playingStart())
+	router.POST("/emby/Sessions/Playing/Progress", auth, playingProgress())
+	router.POST("/emby/Sessions/Playing/Stopped", auth, playingStopped())
+
 	// Sessions API
-	router.GET("/emby/Sessions", AuthTokenMiddleware(30), RequireAdmin(), getSessions())
-	router.POST("/emby/Sessions/:sessionId/Playing/Stop", AuthTokenMiddleware(30), RequireAdmin(), stopSession())
-	router.POST("/emby/Sessions/:sessionId/Message", AuthTokenMiddleware(30), RequireAdmin(), sessionMessage())
-	
+	router.GET("/emby/Sessions", auth, RequireAdmin(), getSessions())
+	router.POST("/emby/Sessions/:sessionId/Playing/Stop", auth, RequireAdmin(), stopSession())
+	router.POST("/emby/Sessions/:sessionId/Message", auth, RequireAdmin(), sessionMessage())
+
 	// Devices API
-	router.GET("/emby/Devices/Info", AuthTokenMiddleware(30), getDeviceInfo())
+	router.GET("/emby/Devices/Info", auth, getDeviceInfo())
 
 	// 客户端能力报告 (Task 4.4)
-	router.POST("/emby/Sessions/Capabilities/Full", AuthTokenMiddleware(30), func(c *gin.Context) {
+	router.POST("/emby/Sessions/Capabilities/Full", auth, func(c *gin.Context) {
 		c.Status(http.StatusNoContent)
 	})
 }
@@ -399,36 +402,36 @@ func updateActiveSession(userID, sessionID, itemID string, positionTicks int64, 
 	if sessionID == "" {
 		sessionID = userID // fallback
 	}
-	
+
 	var user database.User
 	database.Get().Where("id = ?", userID).First(&user)
-	
+
 	var item database.MediaItem
 	database.Get().Where("id = ?", itemID).First(&item)
-	
+
 	activeSessionsMu.Lock()
 	defer activeSessionsMu.Unlock()
-	
+
 	session, exists := activeSessions[sessionID]
 	if !exists {
 		session = &SessionInfo{
-			Id: sessionID,
-			UserId: userID,
-			UserName: user.Name,
+			Id:             sessionID,
+			UserId:         userID,
+			UserName:       user.Name,
 			RemoteEndPoint: ip,
 		}
 	}
-	
+
 	session.LastActivityDate = time.Now().Format(time.RFC3339)
 	session.NowPlayingItem = &NowPlayingItem{
-		Id: item.ID,
+		Id:   item.ID,
 		Name: item.Name,
 		Type: item.Type,
 	}
 	session.PlayState = PlayState{
 		PositionTicks: &positionTicks,
-		IsPaused: isPaused,
+		IsPaused:      isPaused,
 	}
-	
+
 	activeSessions[sessionID] = session
 }

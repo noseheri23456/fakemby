@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # FakEmby 集成测试脚本
-# 测试所有主要功能：认证、媒体浏览、搜索、播放、进度同�?
+# 测试所有主要功能：认证、媒体浏览、搜紀��播放、进度同�?
 set -e
 
 BASE_URL="http://localhost:8096"
-ADMIN_API_KEY="admin-key"
+ADMIN_API_KEY="${FAKEMBY_ADMIN_API_KEY:-admin-key}"
 
 # 颜色输出
 RED='\033[0;31m'

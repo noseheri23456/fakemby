@@ -14,23 +14,25 @@ import (
 	"gorm.io/gorm"
 )
 
-func RegisterUserRoutes(router *gin.Engine) {
-	cfg := config.Get()
+func RegisterUserRoutes(router *gin.Engine, cfg *config.Config) {
 	authSvc := service.NewAuthService(database.Get())
+	auth := AuthTokenMiddleware(cfg.Auth.TokenExpiryDays)
+	// M0-5：读取单个用户资料同样需要归属校验（否则可枚举他人 Policy）
+	owner := RequireUserMatch("userId")
 
 	// Users Core
-	router.POST("/emby/Users/New", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), RequireAdmin(), createUserCore())
-	router.POST("/emby/Users/:userId/Password", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), RequireAdmin(), setUserPassword())
-	router.POST("/emby/Users/:userId/Policy", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), RequireAdmin(), setUserPolicy())
-	router.DELETE("/emby/Users/:userId", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), RequireAdmin(), deleteUserCore())
-	
+	router.POST("/emby/Users/New", auth, RequireAdmin(), createUserCore())
+	router.POST("/emby/Users/:userId/Password", auth, RequireAdmin(), setUserPassword())
+	router.POST("/emby/Users/:userId/Policy", auth, RequireAdmin(), setUserPolicy())
+	router.DELETE("/emby/Users/:userId", auth, RequireAdmin(), deleteUserCore())
+
 	// Query and List
-	router.GET("/emby/Users", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), getAllUsers())
-	router.GET("/emby/Users/Query", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), queryUsers())
-	router.GET("/emby/Users/:userId", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), getUser(authSvc))
-	
+	router.GET("/emby/Users", auth, getAllUsers())
+	router.GET("/emby/Users/Query", auth, queryUsers())
+	router.GET("/emby/Users/:userId", auth, owner, getUser(authSvc))
+
 	// Display Preferences (Task 4.5)
-	router.GET("/emby/DisplayPreferences/usersettings", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), func(c *gin.Context) {
+	router.GET("/emby/DisplayPreferences/usersettings", auth, func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"CustomPrefs": gin.H{}})
 	})
 }
@@ -244,7 +246,7 @@ func getAllUsers() gin.HandlerFunc {
 func queryUsers() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		namePrefix := c.Query("NameStartsWithOrGreater")
-		
+
 		var users []database.User
 		query := database.Get()
 		if namePrefix != "" {

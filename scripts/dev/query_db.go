@@ -1,3 +1,8 @@
+//go:build ignore
+
+// 开发期一次性脚本，用 `go run scripts/dev/query_db.go` 执行。
+// 加 ignore 标签是为了让 `go build ./...` / `go vet ./...` 跳过它——
+// 同目录下有两个 main() 会让整个模块构建失败。
 package main
 
 import (

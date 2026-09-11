@@ -1,10 +1,8 @@
 package emby
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -43,31 +41,31 @@ type UserDTO struct {
 }
 
 type UserPolicy struct {
-	IsAdministrator                bool     `json:"IsAdministrator"`
-	IsHidden                       bool     `json:"IsHidden"`
-	IsHiddenRemotely               bool     `json:"IsHiddenRemotely"`
-	IsDisabled                     bool     `json:"IsDisabled"`
-	EnableRemoteControlOfOtherUsers bool    `json:"EnableRemoteControlOfOtherUsers"`
-	EnableSharedDeviceControl      bool     `json:"EnableSharedDeviceControl"`
-	EnableRemoteAccess             bool     `json:"EnableRemoteAccess"`
-	EnableLiveTvManagement         bool     `json:"EnableLiveTvManagement"`
-	EnableLiveTvAccess             bool     `json:"EnableLiveTvAccess"`
-	EnableMediaPlayback            bool     `json:"EnableMediaPlayback"`
-	EnableAudioPlaybackTranscoding bool     `json:"EnableAudioPlaybackTranscoding"`
-	EnableVideoPlaybackTranscoding bool     `json:"EnableVideoPlaybackTranscoding"`
-	EnablePlaybackRemuxing         bool     `json:"EnablePlaybackRemuxing"`
-	EnableContentDeletion          bool     `json:"EnableContentDeletion"`
-	EnableContentDownloading       bool     `json:"EnableContentDownloading"`
-	EnableSubtitleDownloading      bool     `json:"EnableSubtitleDownloading"`
-	EnableSubtitleManagement       bool     `json:"EnableSubtitleManagement"`
-	EnableSyncTranscoding          bool     `json:"EnableSyncTranscoding"`
-	EnableMediaConversion          bool     `json:"EnableMediaConversion"`
-	EnableAllDevices               bool     `json:"EnableAllDevices"`
-	EnableAllFolders               bool     `json:"EnableAllFolders"`
-	EnabledFolders                 []string `json:"EnabledFolders,omitempty"`
-	BlockedMediaFolders            []string `json:"BlockedMediaFolders,omitempty"`
-	SimultaneousStreamLimit        int      `json:"SimultaneousStreamLimit"`
-	AllowCameraUpload              bool     `json:"AllowCameraUpload"`
+	IsAdministrator                 bool     `json:"IsAdministrator"`
+	IsHidden                        bool     `json:"IsHidden"`
+	IsHiddenRemotely                bool     `json:"IsHiddenRemotely"`
+	IsDisabled                      bool     `json:"IsDisabled"`
+	EnableRemoteControlOfOtherUsers bool     `json:"EnableRemoteControlOfOtherUsers"`
+	EnableSharedDeviceControl       bool     `json:"EnableSharedDeviceControl"`
+	EnableRemoteAccess              bool     `json:"EnableRemoteAccess"`
+	EnableLiveTvManagement          bool     `json:"EnableLiveTvManagement"`
+	EnableLiveTvAccess              bool     `json:"EnableLiveTvAccess"`
+	EnableMediaPlayback             bool     `json:"EnableMediaPlayback"`
+	EnableAudioPlaybackTranscoding  bool     `json:"EnableAudioPlaybackTranscoding"`
+	EnableVideoPlaybackTranscoding  bool     `json:"EnableVideoPlaybackTranscoding"`
+	EnablePlaybackRemuxing          bool     `json:"EnablePlaybackRemuxing"`
+	EnableContentDeletion           bool     `json:"EnableContentDeletion"`
+	EnableContentDownloading        bool     `json:"EnableContentDownloading"`
+	EnableSubtitleDownloading       bool     `json:"EnableSubtitleDownloading"`
+	EnableSubtitleManagement        bool     `json:"EnableSubtitleManagement"`
+	EnableSyncTranscoding           bool     `json:"EnableSyncTranscoding"`
+	EnableMediaConversion           bool     `json:"EnableMediaConversion"`
+	EnableAllDevices                bool     `json:"EnableAllDevices"`
+	EnableAllFolders                bool     `json:"EnableAllFolders"`
+	EnabledFolders                  []string `json:"EnabledFolders,omitempty"`
+	BlockedMediaFolders             []string `json:"BlockedMediaFolders,omitempty"`
+	SimultaneousStreamLimit         int      `json:"SimultaneousStreamLimit"`
+	AllowCameraUpload               bool     `json:"AllowCameraUpload"`
 }
 
 type UserConfig struct {
@@ -157,17 +155,20 @@ func RegisterAuthRoutes(router *gin.Engine, cfg *config.Config) {
 	router.GET("/emby/users/current", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), getCurrentUser(authSvc))
 	router.POST("/emby/sessions/logout", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), logout(authSvc))
 
-	// 调试端点
-	router.GET("/debug/auth", func(c *gin.Context) {
-		token := getTokenFromRequest(c)
-		authHeader := c.GetHeader("Authorization")
-		c.JSON(http.StatusOK, gin.H{
-			"token":        token,
-			"auth_header":  authHeader,
-			"x_emby_token": c.GetHeader("X-Emby-Token"),
-			"api_key":      c.Query("api_key"),
+	// 调试端点：仅在 debug 日志级别下注册（M0-4）
+	// 该端点会回显请求携带的认证材料，留在生产环境等于主动泄漏凭据。
+	if strings.EqualFold(cfg.Log.Level, "debug") {
+		router.GET("/debug/auth", func(c *gin.Context) {
+			token := getTokenFromRequest(c)
+			authHeader := c.GetHeader("Authorization")
+			c.JSON(http.StatusOK, gin.H{
+				"token":        token,
+				"auth_header":  authHeader,
+				"x_emby_token": c.GetHeader("X-Emby-Token"),
+				"api_key":      c.Query("api_key"),
+			})
 		})
-	})
+	}
 }
 
 func authenticateByName(authSvc *service.AuthService, cfg *config.Config) gin.HandlerFunc {
@@ -181,11 +182,8 @@ func authenticateByName(authSvc *service.AuthService, cfg *config.Config) gin.Ha
 
 		var req AuthenticateRequest
 
-		// 读取原始 body 用于调试，然后重新写回
-		bodyBytes, _ := io.ReadAll(c.Request.Body)
-		slog.Info("🔐 请求体", "body", string(bodyBytes), "length", len(bodyBytes))
-		c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-
+		// 注（M0-4 / S6）：这里原先以 Info 级打印完整请求体，其中包含明文密码 Pw。
+		// 日志一旦落盘（或进入日志聚合平台）就等于一份明文密码库，已移除。
 		if err := c.ShouldBind(&req); err != nil {
 			slog.Warn("🔐 ShouldBind 失败", "error", err, "content_type", contentType)
 			c.JSON(http.StatusBadRequest, ErrBadRequest)
@@ -253,9 +251,9 @@ func authenticateByName(authSvc *service.AuthService, cfg *config.Config) gin.Ha
 				PlayState: PlayState{
 					CanSeek: true,
 				},
-				AdditionalUsers: []UserDTO{},
+				AdditionalUsers:    []UserDTO{},
 				PlayableMediaTypes: []string{"Audio", "Video"},
-				SupportedCommands: []string{},
+				SupportedCommands:  []string{},
 			},
 			AccessToken: token,
 			ServerID:    cfg.Server.ID,
@@ -263,6 +261,21 @@ func authenticateByName(authSvc *service.AuthService, cfg *config.Config) gin.Ha
 
 		c.JSON(http.StatusOK, resp)
 	}
+}
+
+// PublicUserDTO 是 /emby/Users/Public 的返回结构（M0-6 / S4）。
+//
+// 该端点无需鉴权，且历史上配合 CORS 全开可被任意网页跨域读取。
+// 因此只保留登录页必需的最小字段，去掉 IsAdmin / Policy——
+// 否则任何人都能枚举出全部管理员账号。
+type PublicUserDTO struct {
+	ID                        string     `json:"Id"`
+	Name                      string     `json:"Name"`
+	ServerID                  string     `json:"ServerId,omitempty"`
+	HasPassword               bool       `json:"HasPassword"`
+	HasConfiguredPassword     bool       `json:"HasConfiguredPassword"`
+	HasConfiguredEasyPassword bool       `json:"HasConfiguredEasyPassword"`
+	Configuration             UserConfig `json:"Configuration,omitempty"`
 }
 
 func getUsersPublic() gin.HandlerFunc {
@@ -275,16 +288,14 @@ func getUsersPublic() gin.HandlerFunc {
 			return
 		}
 
-		userDTOs := make([]UserDTO, 0, len(users))
+		userDTOs := make([]PublicUserDTO, 0, len(users))
 		for _, u := range users {
-			userDTOs = append(userDTOs, UserDTO{
+			userDTOs = append(userDTOs, PublicUserDTO{
 				ID:                        u.ID,
 				Name:                      u.Name,
 				HasPassword:               u.PasswordHash != "",
 				HasConfiguredPassword:     u.PasswordHash != "",
 				HasConfiguredEasyPassword: false,
-				IsAdmin:                   u.IsAdmin,
-				Policy:                    GetUserPolicy(&u),
 				Configuration: UserConfig{
 					PlayDefaultAudioTrack: false,
 					SubtitleMode:          "Default",
@@ -378,16 +389,10 @@ func AuthTokenMiddleware(expiryDays int) gin.HandlerFunc {
 
 		slog.Debug("验证 Token", "token", token[:min(16, len(token))]+"...", "path", c.Request.URL.Path)
 
-		// 检查是否为 Admin API Key
-		cfg := config.Get()
-		if token == cfg.Admin.APIKey {
-			slog.Info("✅ Admin API Key 验证成功", "path", c.Request.URL.Path)
-			c.Set("user_id", "admin")
-			c.Set("is_admin", true)
-			c.Set("token", token)
-			c.Next()
-			return
-		}
+		// 注（M0-3）：此处原先有一段「token == cfg.Admin.APIKey 即以 admin 身份放行全部 /emby/ 端点」的分支。
+		// 管理密钥是长期有效的静态凭据，让它兼任万能 Emby token 等于一个默认值为 change-me 的后门；
+		// 且两套鉴权机制语义不一致（management key vs user token）。现已移除：
+		// 管理操作一律走用户 token + IsAdmin，管理面 REST 走 /api/admin + X-Api-Key。
 
 		t, err := authSvc.VerifyToken(token, expiryDays)
 		if err != nil {
@@ -463,7 +468,8 @@ func getTokenFromRequest(c *gin.Context) string {
 		// 支持 HTTP Basic Auth：Authorization: Basic base64(username:password)
 		if strings.HasPrefix(authHeader, "Basic ") {
 			basicAuth := strings.TrimPrefix(authHeader, "Basic ")
-			slog.Debug("检测到 Basic Auth 请求", "base64", basicAuth[:min(20, len(basicAuth))]+"...")
+			// 不打印 base64 内容：它解码后就是 用户名:密码（M0-4 / S6）
+			slog.Debug("检测到 Basic Auth 请求")
 
 			decoded, err := base64.StdEncoding.DecodeString(basicAuth)
 			if err != nil {

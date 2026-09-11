@@ -15,16 +15,31 @@ import (
 	"github.com/fakemby/fakemby/internal/config"
 	"github.com/fakemby/fakemby/internal/database"
 	"github.com/fakemby/fakemby/internal/emby"
+	"github.com/fakemby/fakemby/internal/logging"
 	"github.com/gin-gonic/gin"
 )
 
 func main() {
+	// 先装一个默认 logger，保证配置加载阶段的告警也能被看到
 	logger := slog.Default()
 
-	// 加载配置
-	cfg, err := config.Load("config.yaml")
+	// 加载配置：CONFIG_FILE 环境变量 / -config 参数 / 默认 config.yaml
+	// 配置文件缺失时回落内置默认值（M0-8）
+	cfg, err := config.Load(config.ConfigPath())
 	if err != nil {
 		logger.Error("加载配置失败", "error", err)
+		os.Exit(1)
+	}
+
+	// 真正把 log.level / log.file 接进 slog handler（M0-8）
+	if logger, err = logging.Setup(cfg); err != nil {
+		logger.Error("初始化日志失败", "error", err)
+		os.Exit(1)
+	}
+
+	// 生成/校验密钥、创建日志与缓存目录（M0-8）
+	if err := cfg.PrepareRuntime(); err != nil {
+		logger.Error("运行时环境准备失败", "error", err)
 		os.Exit(1)
 	}
 
@@ -49,25 +64,25 @@ func main() {
 	router := gin.New()
 
 	// 注册中间件
-	router.Use(emby.CORSMiddleware())
+	router.Use(emby.CORSMiddleware(cfg))
 	router.Use(emby.RequestLogMiddleware())
 	router.Use(emby.ErrorHandlerMiddleware())
 
 	// 注册路由
 	emby.RegisterSystemRoutes(router, cfg)
 	emby.RegisterAuthRoutes(router, cfg)
-	emby.RegisterUserRoutes(router)
-	emby.RegisterUserDataRoutes(router) // Task 4.3 fix
-	emby.RegisterItemRoutes(router)
-	emby.RegisterShowRoutes(router)
+	emby.RegisterUserRoutes(router, cfg)
+	emby.RegisterUserDataRoutes(router, cfg) // Task 4.3 fix
+	emby.RegisterItemRoutes(router, cfg)
+	emby.RegisterShowRoutes(router, cfg)
 	emby.RegisterAdminItemRoutes(router)
 	emby.RegisterImportRoutes(router)
 	emby.RegisterAdminUserRoutes(router)
-	emby.RegisterPlaybackRoutes(router)
-	emby.RegisterSessionRoutes(router)
+	emby.RegisterPlaybackRoutes(router, cfg)
+	emby.RegisterSessionRoutes(router, cfg)
 	emby.RegisterImageRoutes(router, cfg)
-	emby.RegisterSearchRoutes(router)
-	emby.RegisterStatsRoutes(router)
+	emby.RegisterSearchRoutes(router, cfg)
+	emby.RegisterStatsRoutes(router, cfg)
 
 	// WebSocket 端点 - 客户端连接保活（原生实现）
 	router.GET("/embywebsocket", handleWebSocket)

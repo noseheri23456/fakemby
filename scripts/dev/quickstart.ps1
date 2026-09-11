@@ -7,6 +7,13 @@ Write-Host ""
 $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $scriptPath
 
+# M0-2: 管理密钥不再有可用的出厂默认值，必须从环境变量取
+$adminKey = $env:FAKEMBY_ADMIN_API_KEY
+if ([string]::IsNullOrWhiteSpace($adminKey)) {
+    Write-Host "FAKEMBY_ADMIN_API_KEY is not set" -ForegroundColor Red
+    exit 1
+}
+
 Write-Host "1锔忊儯  娓呯悊鏃ц繘绋?.." -ForegroundColor Yellow
 Get-Process fakemby -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Seconds 1
@@ -50,7 +57,7 @@ $json = @{
 
 $response = Invoke-WebRequest -Uri "http://localhost:8096/api/admin/import" `
     -Method POST `
-    -Headers @{"Content-Type"="application/json"; "X-Api-Key"="change-me"} `
+    -Headers @{"Content-Type"="application/json"; "X-Api-Key"=$adminKey} `
     -Body $json -ErrorAction Stop
 $result = $response.Content | ConvertFrom-Json
 Write-Host "  鉁?瀵煎叆鐢靛奖搴擄細$($result.imported) 椤? -ForegroundColor Green
@@ -100,7 +107,7 @@ Write-Host "  鉁?瀵煎叆鐢靛奖搴擄細$($result.imported) 椤? -ForegroundColor Gree
 
 $response = Invoke-WebRequest -Uri "http://localhost:8096/api/admin/import" `
     -Method POST `
-    -Headers @{"Content-Type"="application/json"; "X-Api-Key"="change-me"} `
+    -Headers @{"Content-Type"="application/json"; "X-Api-Key"=$adminKey} `
     -Body $json -ErrorAction Stop
 $result = $response.Content | ConvertFrom-Json
 Write-Host "  鉁?瀵煎叆鐢佃鍓у簱锛?($result.imported) 椤? -ForegroundColor Green

@@ -5,30 +5,35 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/fakemby/fakemby/internal/config"
 	"github.com/fakemby/fakemby/internal/database"
 	"github.com/fakemby/fakemby/internal/service"
 	"github.com/gin-gonic/gin"
 )
 
-func RegisterUserDataRoutes(router *gin.Engine) {
+func RegisterUserDataRoutes(router *gin.Engine, cfg *config.Config) {
 	playSvc := service.NewPlaybackService(database.Get())
 	mediaSvc := service.NewMediaService(database.Get())
 
+	auth := AuthTokenMiddleware(cfg.Auth.TokenExpiryDays)
+	// M0-5：原先每个 handler 里各写一遍「本人或管理员」判定，现统一为中间件
+	owner := RequireUserMatch("userId")
+
 	// 标记已看
-	router.POST("/emby/Users/:userId/PlayedItems/:itemId", AuthTokenMiddleware(30), markAsPlayed(playSvc, mediaSvc))
+	router.POST("/emby/Users/:userId/PlayedItems/:itemId", auth, owner, markAsPlayed(playSvc, mediaSvc))
 
 	// 取消已看
-	router.DELETE("/emby/Users/:userId/PlayedItems/:itemId", AuthTokenMiddleware(30), unmarkAsPlayed(playSvc, mediaSvc))
+	router.DELETE("/emby/Users/:userId/PlayedItems/:itemId", auth, owner, unmarkAsPlayed(playSvc, mediaSvc))
 
 	// 收藏
-	router.POST("/emby/Users/:userId/FavoriteItems/:itemId", AuthTokenMiddleware(30), markAsFavorite(playSvc, mediaSvc))
+	router.POST("/emby/Users/:userId/FavoriteItems/:itemId", auth, owner, markAsFavorite(playSvc, mediaSvc))
 
 	// 取消收藏
-	router.DELETE("/emby/Users/:userId/FavoriteItems/:itemId", AuthTokenMiddleware(30), unmarkAsFavorite(playSvc, mediaSvc))
+	router.DELETE("/emby/Users/:userId/FavoriteItems/:itemId", auth, owner, unmarkAsFavorite(playSvc, mediaSvc))
 
 	// 继续观看列表
-	router.GET("/emby/Users/:userId/Items/Resume", AuthTokenMiddleware(30), getResumeItems(playSvc, mediaSvc))
-	router.GET("/emby/users/:userId/items/resume", AuthTokenMiddleware(30), getResumeItems(playSvc, mediaSvc))
+	router.GET("/emby/Users/:userId/Items/Resume", auth, owner, getResumeItems(playSvc, mediaSvc))
+	router.GET("/emby/users/:userId/items/resume", auth, owner, getResumeItems(playSvc, mediaSvc))
 }
 
 func markAsPlayed(playSvc *service.PlaybackService, mediaSvc *service.MediaService) gin.HandlerFunc {
@@ -36,13 +41,7 @@ func markAsPlayed(playSvc *service.PlaybackService, mediaSvc *service.MediaServi
 		userID := c.Param("userId")
 		itemID := c.Param("itemId")
 
-		// 验证用户是否与 token 匹配
-		tokenUserID := c.GetString("user_id")
-		isAdmin, _ := c.Get("is_admin")
-		if tokenUserID != userID && (isAdmin == nil || !isAdmin.(bool)) {
-			c.JSON(http.StatusForbidden, ErrForbidden)
-			return
-		}
+		// 归属校验已由 RequireUserMatch 中间件完成（M0-5）
 
 		if err := playSvc.MarkAsPlayed(userID, itemID); err != nil {
 			slog.Error("标记已看失败", "error", err)
@@ -51,7 +50,7 @@ func markAsPlayed(playSvc *service.PlaybackService, mediaSvc *service.MediaServi
 		}
 
 		slog.Info("标记已看", "user_id", userID, "item_id", itemID)
-		
+
 		item, err := mediaSvc.GetItemByID(itemID)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{})
@@ -67,13 +66,7 @@ func unmarkAsPlayed(playSvc *service.PlaybackService, mediaSvc *service.MediaSer
 		userID := c.Param("userId")
 		itemID := c.Param("itemId")
 
-		// 验证用户
-		tokenUserID := c.GetString("user_id")
-		isAdmin, _ := c.Get("is_admin")
-		if tokenUserID != userID && (isAdmin == nil || !isAdmin.(bool)) {
-			c.JSON(http.StatusForbidden, ErrForbidden)
-			return
-		}
+		// 归属校验已由 RequireUserMatch 中间件完成（M0-5）
 
 		if err := playSvc.UnmarkAsPlayed(userID, itemID); err != nil {
 			slog.Error("取消已看失败", "error", err)
@@ -98,13 +91,7 @@ func markAsFavorite(playSvc *service.PlaybackService, mediaSvc *service.MediaSer
 		userID := c.Param("userId")
 		itemID := c.Param("itemId")
 
-		// 验证用户
-		tokenUserID := c.GetString("user_id")
-		isAdmin, _ := c.Get("is_admin")
-		if tokenUserID != userID && (isAdmin == nil || !isAdmin.(bool)) {
-			c.JSON(http.StatusForbidden, ErrForbidden)
-			return
-		}
+		// 归属校验已由 RequireUserMatch 中间件完成（M0-5）
 
 		if err := playSvc.MarkAsFavorite(userID, itemID); err != nil {
 			slog.Error("收藏失败", "error", err)
@@ -113,7 +100,7 @@ func markAsFavorite(playSvc *service.PlaybackService, mediaSvc *service.MediaSer
 		}
 
 		slog.Info("收藏", "user_id", userID, "item_id", itemID)
-		
+
 		item, err := mediaSvc.GetItemByID(itemID)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{})
@@ -129,13 +116,7 @@ func unmarkAsFavorite(playSvc *service.PlaybackService, mediaSvc *service.MediaS
 		userID := c.Param("userId")
 		itemID := c.Param("itemId")
 
-		// 验证用户
-		tokenUserID := c.GetString("user_id")
-		isAdmin, _ := c.Get("is_admin")
-		if tokenUserID != userID && (isAdmin == nil || !isAdmin.(bool)) {
-			c.JSON(http.StatusForbidden, ErrForbidden)
-			return
-		}
+		// 归属校验已由 RequireUserMatch 中间件完成（M0-5）
 
 		if err := playSvc.UnmarkAsFavorite(userID, itemID); err != nil {
 			slog.Error("取消收藏失败", "error", err)
@@ -144,7 +125,7 @@ func unmarkAsFavorite(playSvc *service.PlaybackService, mediaSvc *service.MediaS
 		}
 
 		slog.Info("取消收藏", "user_id", userID, "item_id", itemID)
-		
+
 		item, err := mediaSvc.GetItemByID(itemID)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{})
@@ -159,13 +140,7 @@ func getResumeItems(playSvc *service.PlaybackService, mediaSvc *service.MediaSer
 	return func(c *gin.Context) {
 		userID := c.Param("userId")
 
-		// 验证用户
-		tokenUserID := c.GetString("user_id")
-		isAdmin, _ := c.Get("is_admin")
-		if tokenUserID != userID && (isAdmin == nil || !isAdmin.(bool)) {
-			c.JSON(http.StatusForbidden, ErrForbidden)
-			return
-		}
+		// 归属校验已由 RequireUserMatch 中间件完成（M0-5）
 
 		// 解析参数
 		limitStr := c.DefaultQuery("Limit", "20")

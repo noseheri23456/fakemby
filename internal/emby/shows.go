@@ -5,17 +5,18 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/fakemby/fakemby/internal/config"
 	"github.com/fakemby/fakemby/internal/database"
 	"github.com/fakemby/fakemby/internal/service"
 	"github.com/gin-gonic/gin"
 )
 
-func RegisterShowRoutes(router *gin.Engine) {
+func RegisterShowRoutes(router *gin.Engine, cfg *config.Config) {
 	mediaSvc := service.NewMediaService(database.Get())
 
 	seasonsHandler := getSeasons(mediaSvc)
 	episodesHandler := getEpisodes(mediaSvc)
-	authMiddleware := AuthTokenMiddleware(30)
+	authMiddleware := AuthTokenMiddleware(cfg.Auth.TokenExpiryDays)
 
 	// 获取剧集的季列表
 	router.GET("/emby/Shows/:seriesId/Seasons", authMiddleware, seasonsHandler)

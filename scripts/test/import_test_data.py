@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """FakEmby test data importer using /api/admin/import batch API"""
+import os
 import requests, json, sys
 
-SERVER = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:9096"
-API_KEY = sys.argv[2] if len(sys.argv) > 2 else "change-me"
+# M0-2 之后管理密钥不再有可用的出厂默认值，必须从参数或环境变量取
+SERVER = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8096"
+API_KEY = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("FAKEMBY_ADMIN_API_KEY", "")
+
+if not API_KEY:
+    sys.exit("缺少管理密钥：请传入第二个参数，或设置环境变量 FAKEMBY_ADMIN_API_KEY")
 
 headers = {"Content-Type": "application/json", "X-Api-Key": API_KEY}
 

@@ -1,12 +1,25 @@
 package config
 
 import (
+	cryptorand "crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/viper"
+)
+
+// 已知的不安全默认值（来自历史配置 / 开源仓库），命中即视为"未配置"
+const (
+	DefaultAdminAPIKey = "change-me"
+	DefaultSignKey     = "change-me-in-production"
+
+	DefaultTokenExpiryDays = 30
+	DefaultPort            = 8096
 )
 
 type Config struct {
@@ -26,6 +39,9 @@ type ServerConfig struct {
 	Name    string `mapstructure:"name"`
 	Version string `mapstructure:"version"`
 	ID      string `mapstructure:"id"`
+	// CORSOrigins 允许跨域访问的 Origin 白名单。
+	// 空 = 同源（不输出 Access-Control-Allow-* 头）；"*" 表示允许任意源（此时强制关闭 credentials）。
+	CORSOrigins []string `mapstructure:"cors_origins"`
 }
 
 type DatabaseConfig struct {
@@ -47,6 +63,9 @@ type PlaybackConfig struct {
 	Redirect bool   `mapstructure:"redirect"`
 	SignKey  string `mapstructure:"sign_key"`
 	SignTTL  int    `mapstructure:"sign_ttl"`
+	// SignPrefixes 只对 URL 命中这些前缀的播放源追加签名参数。
+	// 对不配合校验的第三方 CDN 追加我方签名没有意义（M0-7 的设计边界）。
+	SignPrefixes []string `mapstructure:"sign_prefixes"`
 }
 
 type AdminConfig struct {
@@ -66,17 +85,47 @@ type LogConfig struct {
 
 var globalConfig *Config
 
+// ConfigPath 返回配置文件路径：优先 CONFIG_FILE，其次是命令行参数，最后回落 config.yaml
+func ConfigPath() string {
+	if p := os.Getenv("CONFIG_FILE"); p != "" {
+		return p
+	}
+	for i, arg := range os.Args {
+		if arg == "-config" || arg == "--config" {
+			if i+1 < len(os.Args) {
+				return os.Args[i+1]
+			}
+		}
+	}
+	return "config.yaml"
+}
+
+// Load 加载配置。
+// 配置文件缺失时不再直接失败，而是回落内置默认值（便于容器/一次性场景零配置启动），
+// 但会在日志中明确告警。配置文件存在但内容非法时仍然报错。
 func Load(configPath string) (*Config, error) {
 	v := viper.New()
 	v.SetConfigFile(configPath)
 	v.SetConfigType("yaml")
 
-	// 支持环境变量覆盖
-	v.AutomaticEnv()
+	setDefaults(v)
+
+	// 环境变量覆盖：FAKEMBY_SERVER_PORT 这类下划线形式
 	v.SetEnvPrefix("FAKEMBY")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
+	v.AutomaticEnv()
+	bindEnvKeys(v)
 
 	if err := v.ReadInConfig(); err != nil {
-		return nil, fmt.Errorf("读取配置文件失败: %w", err)
+		var notFound viper.ConfigFileNotFoundError
+		var pathErr *os.PathError
+		if errors.As(err, &notFound) || errors.As(err, &pathErr) || os.IsNotExist(err) {
+			slog.Warn("配置文件不存在，使用内置默认值启动",
+				"path", configPath,
+				"hint", "可通过 CONFIG_FILE 指定路径，或用 FAKEMBY_ 前缀环境变量覆盖")
+		} else {
+			return nil, fmt.Errorf("读取配置文件失败: %w", err)
+		}
 	}
 
 	var cfg Config
@@ -86,12 +135,64 @@ func Load(configPath string) (*Config, error) {
 
 	// 设置默认值
 	if cfg.Server.ID == "" || cfg.Server.ID == "fakemby-xxxxx" {
-		// 生成默认 ID（可以在这里生成 UUID）
 		cfg.Server.ID = "fakemby-default"
 	}
 
 	globalConfig = &cfg
 	return &cfg, nil
+}
+
+func setDefaults(v *viper.Viper) {
+	v.SetDefault("server.host", "0.0.0.0")
+	v.SetDefault("server.port", DefaultPort)
+	v.SetDefault("server.name", "FakEmby Server")
+	v.SetDefault("server.version", "4.8.0.0")
+	v.SetDefault("server.id", "fakemby-xxxxx")
+	v.SetDefault("server.cors_origins", []string{})
+
+	v.SetDefault("database.path", "./fakemby.db")
+	v.SetDefault("database.wal_mode", true)
+
+	v.SetDefault("auth.token_expiry_days", DefaultTokenExpiryDays)
+
+	v.SetDefault("image.mode", "redirect")
+	v.SetDefault("image.cache_dir", "./cache/images")
+	v.SetDefault("image.cdn_prefix", "")
+
+	v.SetDefault("playback.redirect", true)
+	v.SetDefault("playback.sign_key", "")
+	v.SetDefault("playback.sign_ttl", 3600)
+	v.SetDefault("playback.sign_prefixes", []string{})
+
+	v.SetDefault("admin.api_key", "")
+
+	v.SetDefault("tmdb.api_key", "")
+	v.SetDefault("tmdb.language", "zh-CN")
+	v.SetDefault("tmdb.image_base", "https://image.tmdb.org/t/p/original")
+
+	v.SetDefault("log.level", "info")
+	v.SetDefault("log.file", "")
+}
+
+// bindEnvKeys 显式绑定所有叶子键。
+// viper 的 AutomaticEnv 对"配置文件里不存在、只有默认值"的嵌套键不会生效，
+// 必须显式 BindEnv 才能让 FAKEMBY_SERVER_PORT 这类变量真正覆盖。
+func bindEnvKeys(v *viper.Viper) {
+	keys := []string{
+		"server.host", "server.port", "server.name", "server.version", "server.id", "server.cors_origins",
+		"database.path", "database.wal_mode",
+		"auth.token_expiry_days",
+		"image.mode", "image.cache_dir", "image.cdn_prefix",
+		"playback.redirect", "playback.sign_key", "playback.sign_ttl", "playback.sign_prefixes",
+		"admin.api_key",
+		"tmdb.api_key", "tmdb.language", "tmdb.image_base",
+		"log.level", "log.file",
+	}
+	for _, k := range keys {
+		if err := v.BindEnv(k); err != nil {
+			slog.Warn("绑定环境变量失败", "key", k, "error", err)
+		}
+	}
 }
 
 func Get() *Config {
@@ -101,10 +202,13 @@ func Get() *Config {
 func (c *Config) PrintConfig() {
 	logger := slog.Default()
 	logger.Info("=== FakEmby 配置 ===")
-	logger.Info("服务器", "host", c.Server.Host, "port", c.Server.Port)
+	logger.Info("服务器", "host", c.Server.Host, "port", c.Server.Port, "cors_origins", c.Server.CORSOrigins)
 	logger.Info("数据库", "path", c.Database.Path, "wal_mode", c.Database.WALMode)
 	logger.Info("认证", "token_expiry_days", c.Auth.TokenExpiryDays)
 	logger.Info("图片", "mode", c.Image.Mode, "cache_dir", c.Image.CacheDir)
+	logger.Info("播放", "redirect", c.Playback.Redirect, "sign_ttl", c.Playback.SignTTL,
+		"sign_enabled", c.SigningEnabled(), "sign_prefixes", c.Playback.SignPrefixes)
+	logger.Info("管理", "api_key_configured", c.AdminAPIKeyUsable())
 	logger.Info("日志", "level", c.Log.Level, "file", c.Log.File)
 }
 
@@ -113,14 +217,88 @@ func (s ServerConfig) GetListenAddr() string {
 	return s.Host + ":" + fmt.Sprint(s.Port)
 }
 
-// ValidateSignKey 检查签名密钥是否安全（生产环境提示）
-func (c *Config) ValidateSignKey() {
-	if c.Playback.SignKey == "change-me-in-production" {
-		slog.Warn("⚠️ 警告: 使用默认签名密钥，请在生产环境中更改")
+// TokenExpiryDays 返回 token 过期天数，非法值回落默认值
+func (c *Config) TokenExpiryDays() int {
+	if c == nil || c.Auth.TokenExpiryDays <= 0 {
+		return DefaultTokenExpiryDays
 	}
-	if c.Admin.APIKey == "change-me" {
-		slog.Warn("⚠️ 警告: 使用默认管理 API 密钥，请在生产环境中更改")
+	return c.Auth.TokenExpiryDays
+}
+
+// AdminAPIKeyUsable 管理密钥是否可用于鉴权（已配置且非公开默认值）
+func (c *Config) AdminAPIKeyUsable() bool {
+	return c != nil && c.Admin.APIKey != "" && c.Admin.APIKey != DefaultAdminAPIKey
+}
+
+// SigningEnabled 是否启用播放直链签名
+func (c *Config) SigningEnabled() bool {
+	return c != nil && c.Playback.SignKey != "" && c.Playback.SignKey != DefaultSignKey
+}
+
+// ValidateSignKey 检查签名密钥 / 管理密钥是否安全。
+// 返回值仅为提示性警告列表，调用方负责打印。
+func (c *Config) ValidateSignKey() []string {
+	var warns []string
+	if !c.SigningEnabled() {
+		warns = append(warns, "playback.sign_key 未配置或仍为默认值，播放直链签名已禁用")
 	}
+	if !c.AdminAPIKeyUsable() {
+		warns = append(warns, "admin.api_key 未配置或仍为默认值 change-me，管理接口将拒绝所有请求")
+	}
+	return warns
+}
+
+// EnsureSignKey 保证签名密钥可用：未配置或仍是仓库里的公开默认值时，生成临时随机密钥。
+//
+// 临时密钥不跨进程保留，重启后此前签发的直链会失效。这是刻意取舍——
+// 宁可让旧链接失效，也不要用一个公开在源码里的常量去做"看起来有防护"的签名。
+func (c *Config) EnsureSignKey() {
+	if c.SigningEnabled() {
+		return
+	}
+	if c.Playback.SignKey == DefaultSignKey {
+		slog.Warn("⚠️ playback.sign_key 仍是仓库里的公开默认值，已忽略并改用临时随机密钥",
+			"hint", "设置 FAKEMBY_PLAYBACK_SIGN_KEY 或配置文件 playback.sign_key")
+	} else {
+		slog.Warn("playback.sign_key 未配置，已生成临时随机签名密钥（重启后旧直链将失效）",
+			"hint", "生产环境建议在配置中固定一个强随机值")
+	}
+	b := make([]byte, 32)
+	if _, err := cryptorand.Read(b); err != nil {
+		slog.Error("生成随机签名密钥失败，签名功能保持禁用", "error", err)
+		return
+	}
+	c.Playback.SignKey = hex.EncodeToString(b)
+}
+
+// ShouldSign 判断某个源 URL 是否需要追加签名参数。
+// sign_prefixes 为空表示对所有源签名（便于自建反代场景）。
+func (c *Config) ShouldSign(rawURL string) bool {
+	if c == nil || rawURL == "" {
+		return false
+	}
+	if len(c.Playback.SignPrefixes) == 0 {
+		return true
+	}
+	for _, p := range c.Playback.SignPrefixes {
+		if p != "" && strings.HasPrefix(rawURL, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// PrepareRuntime 启动时一次性准备：生成/校验密钥、创建日志与缓存目录并输出安全告警
+func (c *Config) PrepareRuntime() error {
+	c.EnsureSignKey()
+
+	for _, w := range c.ValidateSignKey() {
+		slog.Warn("⚠️ "+w, "hint", "可用 FAKEMBY_ADMIN_API_KEY / FAKEMBY_PLAYBACK_SIGN_KEY 覆盖")
+	}
+	if err := c.EnsureLogDir(); err != nil {
+		return err
+	}
+	return c.EnsureCacheDir()
 }
 
 // EnsureLogDir 创建日志目录

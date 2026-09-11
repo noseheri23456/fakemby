@@ -5,7 +5,7 @@
 set -e
 
 BASE_URL="http://localhost:8096"
-ADMIN_API_KEY="admin-key"
+ADMIN_API_KEY="${FAKEMBY_ADMIN_API_KEY:-admin-key}"
 
 echo "========================================"
 echo "FakEmby 娴嬭瘯鏁版嵁瀵煎叆"

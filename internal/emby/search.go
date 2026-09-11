@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/fakemby/fakemby/internal/config"
 	"github.com/fakemby/fakemby/internal/database"
 	"github.com/fakemby/fakemby/internal/service"
 	"github.com/fakemby/fakemby/internal/types"
@@ -24,10 +25,10 @@ type SearchHintsResponse struct {
 	TotalRecordCount int64                 `json:"TotalRecordCount"`
 }
 
-func RegisterSearchRoutes(router *gin.Engine) {
-	router.GET("/emby/Search/Hints", AuthTokenMiddleware(30), searchHints())
-	router.GET("/emby/Items/:itemId/Similar", AuthTokenMiddleware(30), getSimilarItems())
-	router.GET("/emby/items/:itemId/similar", AuthTokenMiddleware(30), getSimilarItems())
+func RegisterSearchRoutes(router *gin.Engine, cfg *config.Config) {
+	router.GET("/emby/Search/Hints", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), searchHints())
+	router.GET("/emby/Items/:itemId/Similar", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), getSimilarItems())
+	router.GET("/emby/items/:itemId/similar", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), getSimilarItems())
 }
 
 func searchHints() gin.HandlerFunc {

@@ -1,9 +1,13 @@
 server:
   host: "0.0.0.0"
-  port: 9096
+  # M0-10：与 README / docker-compose / Dockerfile 对齐为 8096
+  port: 8096
   name: "FakEmby Server"
   version: "4.8.0.0"
   id: "fakemby-xxxxx"
+  # M0-6：CORS 白名单。为空 = 同源（不输出任何 CORS 头）。
+  # 填 "*" 表示允许任意来源，但会强制关闭 credentials（两者不可共存）。
+  cors_origins: []
 
 database:
   path: "./fakemby.db"
@@ -19,11 +23,18 @@ image:
 
 playback:
   redirect: true
-  sign_key: "change-me-in-production"
+  # M0-7：HMAC 直链签名密钥。留空或保持出厂默认值时，启动会自动生成临时随机密钥
+  # （重启后旧直链失效）。生产环境请固定一个强随机值：openssl rand -hex 32
+  sign_key: ""
   sign_ttl: 3600
+  # 只对 URL 命中这些前缀的源追加签名参数；留空 = 对所有源签名。
+  # 对不配合校验的第三方 CDN 追加我方签名没有意义，那种场景请把它排除。
+  sign_prefixes: []
 
 admin:
-  api_key: "change-me"
+  # M0-2：管理接口密钥。留空或仍为出厂默认值 "change-me" 时，管理接口拒绝所有请求。
+  # 可用 FAKEMBY_ADMIN_API_KEY 环境变量覆盖。
+  api_key: ""
 
 tmdb:
   api_key: ""
@@ -32,4 +43,5 @@ tmdb:
 
 log:
   level: "info"
-  file: "./logs/fakemby.log"
+  # 留空则只输出到 stderr
+  file: ""

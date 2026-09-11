@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/fakemby/fakemby/internal/config"
 	"github.com/fakemby/fakemby/internal/database"
 	"github.com/gin-gonic/gin"
 )
@@ -14,9 +15,9 @@ type CustomQueryRequest struct {
 	ReplaceUserId     bool   `json:"ReplaceUserId"`
 }
 
-func RegisterStatsRoutes(router *gin.Engine) {
+func RegisterStatsRoutes(router *gin.Engine, cfg *config.Config) {
 	// Sakura_embyboss (or rather the User Usage Stats Plugin) expects this route
-	router.POST("/emby/user_usage_stats/submit_custom_query", AuthTokenMiddleware(30), RequireAdmin(), submitCustomQuery())
+	router.POST("/emby/user_usage_stats/submit_custom_query", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), RequireAdmin(), submitCustomQuery())
 }
 
 func submitCustomQuery() gin.HandlerFunc {

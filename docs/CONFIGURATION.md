@@ -2,21 +2,31 @@
 
 ## 配置文件
 
-默认配置文件为项目根目录的 `config.yaml`。可通过环境变量 `CONFIG_FILE` 指定路径：
+默认配置文件为项目根目录的 `config.yaml`。路径按以下优先级确定：
+
+1. 环境变量 `CONFIG_FILE`
+2. 命令行参数 `-config <path>`
+3. 默认 `config.yaml`
 
 ```bash
 CONFIG_FILE=./config.prod.yaml ./fakemby
 ```
+
+> 配置文件**不存在**时不会报错，而是回落内置默认值启动（便于容器零配置场景），
+> 但会在日志里明确告警。配置文件存在但内容非法时仍然直接失败。
 
 ### 完整配置项
 
 ```yaml
 server:
   host: "0.0.0.0"             # 监听地址
-  port: 8096                   # 监听端口
+  port: 8096                  # 监听端口
   name: "FakEmby Server"      # 服务器名称（客户端显示）
   version: "4.8.0.0"          # 模拟的 Emby 版本号
   id: "fakemby-xxxxx"         # 服务器 ID（首次运行自动生成）
+  cors_origins: []            # CORS 白名单，空 = 同源（不输出任何 CORS 头）
+                              # 填 "*" 允许任意来源，但会强制关闭 credentials
+                              # 例：["https://emby.example.com"]
 
 database:
   path: "./fakemby.db"         # SQLite 数据库路径
@@ -28,16 +38,22 @@ auth:
 image:
   mode: "redirect"             # redirect: 302 重定向到外部 URL
                                # proxy_cache: 下载到本地后返回文件
-  cache_dir: "./cache/images"  # proxy_cache 模式的本地缓存目录
+  cache_dir: "./cache/images"  # proxy_cache 模式的本地缓存目录（启动时自动创建）
   cdn_prefix: ""               # 可选的 CDN 前缀 URL
 
 playback:
   redirect: true               # 是否 302 重定向播放
-  sign_key: "change-me-in-production"  # HMAC-SHA256 签名密钥（⚠️ 必须修改）
+  sign_key: ""                 # HMAC-SHA256 签名密钥
+                               # 留空或仍为出厂默认值时，启动自动生成临时随机密钥
+                               # （重启后旧直链失效），生产请固定：openssl rand -hex 32
   sign_ttl: 3600               # 签名有效期（秒）
+  sign_prefixes: []            # 只对 URL 命中这些前缀的源追加签名；空 = 全部签名
+                               # 对不配合校验的第三方 CDN 追加我方签名没有意义
 
 admin:
-  api_key: "change-me"         # 管理 API 密钥（⚠️ 必须修改）
+  api_key: ""                  # 管理 API 密钥
+                               # 留空或仍为出厂默认值 "change-me" 时，
+                               # /api/admin/* 拒绝所有请求（401）
 
 tmdb:
   api_key: ""                  # TMDb API Key（可选，用于元数据获取）
@@ -46,28 +62,58 @@ tmdb:
 
 log:
   level: "info"                # 日志级别：debug | info | warn | error
-  file: "./logs/fakemby.log"   # 日志文件路径
+  file: ""                     # 日志文件路径，留空则只输出 stderr
 ```
 
 ## 环境变量
 
-所有配置项可通过环境变量覆盖，前缀为 `FAKEMBY_`，层级用 `_` 分隔：
+所有配置项可通过环境变量覆盖，前缀为 `FAKEMBY_`，层级用 `_` 分隔
+（`server.port` → `FAKEMBY_SERVER_PORT`）：
 
 | 环境变量 | 对应配置 | 示例 |
 |---------|---------|------|
-| `FAKEMBY_SERVER_PORT` | `server.port` | `9096` |
+| `CONFIG_FILE` | 配置文件路径（非 FAKEMBY_ 前缀） | `./config.prod.yaml` |
+| `FAKEMBY_SERVER_PORT` | `server.port` | `8096` |
 | `FAKEMBY_SERVER_HOST` | `server.host` | `127.0.0.1` |
+| `FAKEMBY_SERVER_CORS_ORIGINS` | `server.cors_origins` | `https://a.com,https://b.com` |
 | `FAKEMBY_DATABASE_PATH` | `database.path` | `/app/data/fakemby.db` |
+| `FAKEMBY_AUTH_TOKEN_EXPIRY_DAYS` | `auth.token_expiry_days` | `7` |
 | `FAKEMBY_ADMIN_API_KEY` | `admin.api_key` | `my-secret-key` |
 | `FAKEMBY_PLAYBACK_SIGN_KEY` | `playback.sign_key` | `hmac-secret-key` |
+| `FAKEMBY_PLAYBACK_SIGN_TTL` | `playback.sign_ttl` | `3600` |
 | `FAKEMBY_IMAGE_MODE` | `image.mode` | `proxy_cache` |
-| `LOG_LEVEL` | `log.level` | `debug` |
+| `FAKEMBY_LOG_LEVEL` | `log.level` | `debug` |
+| `FAKEMBY_LOG_FILE` | `log.file` | `./logs/fakemby.log` |
 
 示例：
 
 ```bash
-FAKEMBY_SERVER_PORT=9096 FAKEMBY_ADMIN_API_KEY=my-key LOG_LEVEL=debug ./fakemby
+FAKEMBY_SERVER_PORT=8096 FAKEMBY_ADMIN_API_KEY=my-key FAKEMBY_LOG_LEVEL=debug ./fakemby
 ```
+
+> 注意：早期文档里写过的 `LOG_LEVEL`、`SERVER_PORT`（无前缀）**不会生效**，
+> docker-compose 也已同步改为 `FAKEMBY_` 前缀。
+
+## 播放直链签名（`/api/auth/verify`）
+
+`playback.sign_key` 配置后，`PlaybackInfo` 返回的 `DirectStreamUrl` 会带
+`uid` / `exp` / `sig` 三个参数（不再包含长期 token），有效期 `sign_ttl` 秒。
+自建反代（Nginx/OpenList 等）可回调本服务校验：
+
+```bash
+# 形式一：原始 payload
+curl "http://localhost:8096/api/auth/verify?payload=video|<itemId>|<sourceId>|<userId>|&exp=1700000000&sig=<hex>"
+
+# 形式二：字段展开（推荐）
+curl "http://localhost:8096/api/auth/verify?type=video&item_id=<id>&source_id=<src>&uid=<uid>&exp=1700000000&sig=<hex>"
+```
+
+校验通过返回 `200 {"valid":true}`，过期返回 `401 {"Message":"signature expired"}`，
+签名不符返回 `401 {"Message":"signature mismatch"}`。
+
+**防护边界**：只有当直链服务端愿意校验我方签名时，签名才有防盗链意义。
+对不配合的第三方 CDN，请把它的前缀排除出 `sign_prefixes`——那种场景的防线是
+`PlaybackInfo` 自身的鉴权与源站 URL 自带的时效性。
 
 ---
 
@@ -205,9 +251,22 @@ CREATE INDEX idx_progress_user ON play_progress(user_id);
 
 ⚠️ **生产环境部署前务必完成：**
 
-- [ ] 修改 `admin.api_key`（控制所有数据写入操作）
-- [ ] 修改 `playback.sign_key`（控制播放 URL 签名）
-- [ ] 删除默认 admin 用户，创建新管理员账户
+- [ ] 设置 `admin.api_key` / `FAKEMBY_ADMIN_API_KEY`（留空或未改掉 `change-me` 时管理接口全部拒绝）
+- [ ] 设置 `playback.sign_key` / `FAKEMBY_PLAYBACK_SIGN_KEY`（留空时启动会生成临时随机密钥）
+- [ ] 修改默认 `admin` / `admin` 口令
+- [ ] 按需收紧 `server.cors_origins`（默认同源，不输出 CORS 头）
 - [ ] 使用 HTTPS（反向代理 + TLS 证书）
 - [ ] 限制 8096 端口的网络访问范围
 - [ ] 配置数据库定期备份
+
+### M0 之后已修复的历史风险
+
+以下各项在 `v0.9.0-pre` 之后的代码里已处理，升级时请注意行为变化：
+
+| 变更 | 影响 |
+|------|------|
+| `/api/admin/*` 统一要求 `X-Api-Key`，且 `change-me` 不再被接受 | 旧脚本需改走 `FAKEMBY_ADMIN_API_KEY` |
+| `admin.api_key` 不再能当作 `/emby/*` 的万能 token | 管理操作改用管理员用户 token |
+| `DirectStreamUrl` 不再拼接 `api_key` | 依赖该参数的外部播放器改用签名参数 `exp`/`sig` |
+| 读侧 `:userId` 归属校验 | 跨用户查询返回 403（管理员不受限） |
+| CORS 默认同源 | 浏览器跨域访问需在 `server.cors_origins` 显式放行 |

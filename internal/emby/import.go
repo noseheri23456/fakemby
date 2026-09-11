@@ -19,37 +19,37 @@ type ImportRequest struct {
 }
 
 type ImportItem struct {
-	Name            string            `json:"name"`
-	OriginalTitle   string            `json:"original_title"`
-	Year            *int              `json:"year"`
-	Type            string            `json:"type"` // Movie, Series, Season, Episode
-	Overview        string            `json:"overview"`
-	Genres          []string          `json:"genres"`
-	Studios         []string          `json:"studios"`
-	Tags            []string                 `json:"tags"`
-	Taglines        []string                 `json:"taglines"`        // 电影标语
-	ExternalUrls    []ImportExternalUrl      `json:"external_urls"`   // 外部链接
-	People          []ImportPerson           `json:"people"`          // 演员、导演、编剧等
-	CommunityRating *float64          `json:"community_rating"`
-	OfficialRating  string            `json:"official_rating"` // PG, R, NC-17 等
-	TMDBID          string            `json:"tmdb_id"`
-	IMDBID          string            `json:"imdb_id"`
-	TVDBID          string            `json:"tvdb_id"`
-	RuntimeMinutes  *int64                 `json:"runtime_minutes"`
-	IsHidden        bool                   `json:"is_hidden"`
-	SeasonNumber    *int                   `json:"season_number"`
-	EpisodeNumber   *int              `json:"episode_number"`
-	PremiereDate    *string           `json:"premiere_date"` // ISO 8601 格式
-	Images          map[string]string `json:"images"`        // type -> URL
-	Sources         []ImportSource    `json:"sources"`
-	Subtitles       []ImportSubtitle  `json:"subtitles"`
-	Seasons         []ImportSeason    `json:"seasons"` // 嵌套的 Seasons（Series 内部）
+	Name            string              `json:"name"`
+	OriginalTitle   string              `json:"original_title"`
+	Year            *int                `json:"year"`
+	Type            string              `json:"type"` // Movie, Series, Season, Episode
+	Overview        string              `json:"overview"`
+	Genres          []string            `json:"genres"`
+	Studios         []string            `json:"studios"`
+	Tags            []string            `json:"tags"`
+	Taglines        []string            `json:"taglines"`      // 电影标语
+	ExternalUrls    []ImportExternalUrl `json:"external_urls"` // 外部链接
+	People          []ImportPerson      `json:"people"`        // 演员、导演、编剧等
+	CommunityRating *float64            `json:"community_rating"`
+	OfficialRating  string              `json:"official_rating"` // PG, R, NC-17 等
+	TMDBID          string              `json:"tmdb_id"`
+	IMDBID          string              `json:"imdb_id"`
+	TVDBID          string              `json:"tvdb_id"`
+	RuntimeMinutes  *int64              `json:"runtime_minutes"`
+	IsHidden        bool                `json:"is_hidden"`
+	SeasonNumber    *int                `json:"season_number"`
+	EpisodeNumber   *int                `json:"episode_number"`
+	PremiereDate    *string             `json:"premiere_date"` // ISO 8601 格式
+	Images          map[string]string   `json:"images"`        // type -> URL
+	Sources         []ImportSource      `json:"sources"`
+	Subtitles       []ImportSubtitle    `json:"subtitles"`
+	Seasons         []ImportSeason      `json:"seasons"` // 嵌套的 Seasons（Series 内部）
 }
 
 type ImportPerson struct {
 	Name     string `json:"name"`
-	Type     string `json:"type"` // Actor, Director, Writer, Producer, etc.
-	Role     string `json:"role"` // 角色（仅用于演员）
+	Type     string `json:"type"`      // Actor, Director, Writer, Producer, etc.
+	Role     string `json:"role"`      // 角色（仅用于演员）
 	ImageUrl string `json:"image_url"` // 头像链接
 }
 
@@ -196,9 +196,9 @@ func importItem(tx *gorm.DB, libraryID string, item ImportItem, parentID *string
 		tx.Model(&database.MediaItem{}).Where("id = ?", id).Count(&count)
 		if count == 0 {
 			tx.Create(&database.MediaItem{
-				ID:       id,
-				Name:     name,
-				Type:     itemType,
+				ID:   id,
+				Name: name,
+				Type: itemType,
 			})
 		}
 	}
@@ -220,7 +220,7 @@ func importItem(tx *gorm.DB, libraryID string, item ImportItem, parentID *string
 	for _, p := range item.People {
 		personID := generateDeterministicID("person", p.Name)
 		createVirtualItem(personID, p.Name, "Person")
-		
+
 		person := map[string]interface{}{
 			"Name": p.Name,
 			"Type": p.Type,
@@ -233,7 +233,7 @@ func importItem(tx *gorm.DB, libraryID string, item ImportItem, parentID *string
 		if p.ImageUrl != "" {
 			hash := md5.Sum([]byte(p.ImageUrl))
 			tag := hex.EncodeToString(hash[:])[:8]
-			
+
 			// 保存到数据库
 			var imgCount int64
 			tx.Model(&database.Image{}).Where("item_id = ? AND type = ?", personID, "Primary").Count(&imgCount)
@@ -368,8 +368,8 @@ func importItem(tx *gorm.DB, libraryID string, item ImportItem, parentID *string
 					episodeNum = *episode.EpisodeNumber
 				}
 
-			episodeItem := &database.MediaItem{
-				ID:               newShortID(),
+				episodeItem := &database.MediaItem{
+					ID:            newShortID(),
 					LibraryID:     libraryID,
 					ParentID:      &seasonID,
 					Type:          "Episode",
@@ -385,8 +385,8 @@ func importItem(tx *gorm.DB, libraryID string, item ImportItem, parentID *string
 
 				// 添加 Episode 的播放源
 				for _, src := range episode.Sources {
-				source := &database.MediaSource{
-					ID:        newShortID(),
+					source := &database.MediaSource{
+						ID:        newShortID(),
 						ItemID:    episodeItem.ID,
 						Name:      src.Name,
 						URL:       src.URL,
@@ -427,22 +427,5 @@ func normalizePremiereDateFromStr(dateStr *string) *string {
 	return dateStr
 }
 
-// adminAuth 管理接口认证中间件
-func adminAuth() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		apiKey := c.GetHeader("X-Api-Key")
-		if apiKey == "" {
-			apiKey = c.Query("api_key")
-		}
-
-		// 从配置中获取管理 API 密钥（简化：硬编码）
-		// 实际应该从 config 中读取
-		if apiKey != "change-me" { // TODO: 从 config 读取
-			c.JSON(http.StatusUnauthorized, ErrUnauthorized)
-			c.Abort()
-			return
-		}
-
-		c.Next()
-	}
-}
+// 注：原 adminAuth() 硬编码比较 "change-me" 的实现已移除，
+// 新实现见 internal/emby/authz.go（读配置 + 常量时间比较）。
