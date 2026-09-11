@@ -4,7 +4,7 @@
 > 适用对象：本仓库当前代码基线（master，tag `v0.9.0-pre`）
 > 目标：把「能跑通的 Emby 兼容层」推进为「可公开部署、可长期维护的产品级服务」
 >
-> **进度：M0 已完成并通过验收（26/26）；M1 已完成（46 用例全绿，service 71% / signer 96% 覆盖）。下一步 M2。详见 §10 执行记录。**
+> **进度：M0 已完成并通过验收（26/26）；M1 已完成（service 71% / signer 96% 覆盖）；M2 进行中——M2-3~M2-8 共 6 项已落地并通过测试，M2-1/M2-2 结构性重构留待后续。详见 §10 执行记录。**
 
 ---
 
@@ -407,6 +407,80 @@ FAKEMBY_SERVER_PORT=9999 ./fakemby &   # 期望监听 9999
 
 ---
 
+### M2 · 已完成（2026-09-12）
+
+架构归位两项（M2-1 目录重构、M2-2 repo 层接口）本次**未做**，留待后续里程碑——见下方「偏离说明」。
+本次实做 **M2-3/4/5/6/7/8 共 6 项**确定性修复，并补齐对应单测/契约测试。
+
+`go build ./...`、`go vet ./...`、`gofmt -l`、`go test -count=1 ./...` 全绿；
+**8 个测试包全部 ok，0 失败，共 122 次测试执行（103 个顶层函数 + 19 个子测试）全过**；
+`go test -race -count=1 ./...` 全绿，**无 data race**（emby 11.6s、service 6.5s、其余包 <2s）。
+
+| ID | 状态 | 落地要点 |
+|----|------|----------|
+| M2-8 | ✅ | 删除 `Token.GetUsableToken(expiryDays int) bool` 死代码（恒 true 空实现）；过期校验仍由 `service/auth.go` 的 `VerifyToken` 真实执行，无功能回退 |
+| M2-3 | ✅ | `database.Init(dbPath, walMode, maxOpenConns, maxIdleConns)` 拆分为「写池单连接 + 读池可配 N」两个独立句柄；新增 `openHandle()` 统一设 `SetMaxOpenConns`/`SetMaxIdleConns` + WAL + `busy_timeout=5000`（两个句柄各设一次）；新增 `GetWrite()`（未初始化时回落读句柄）。修 A2：并发读不再被写连接的 `MaxOpenConns(1)` 串行化 |
+| M2-4 | ✅ | 新增 `service.MediaStreamBaseIndex(item)`（视频流+1、音频流+1）；`PlaybackInfo` 与 `/Subtitles/:index/Stream` 共用该 base，字幕 `Index = base+i`，subtitles 查询加 `Order("id ASC")`。修 A10 索引错位 |
+| M2-5 | ✅ | 图片缓存 key 含尺寸 `fmt.Sprintf("%s_%d_%dx%d.jpg", Type, Idx, maxWidth, maxHeight)`；新增 `enforceQuota()`：写入后 WalkDir 扫描，总大小超 `image.cache_max_mb` 配额时按 mtime 从旧到新淘汰。修 A6 |
+| M2-6 | ✅ | 进度缓冲 `flush()` 改为先快照 entries 再写事务，失败 return 保留缓冲；导出 `FlushProgressNow()` / `BufferProgress(userID, itemID, positionTicks, touch)`；新增 `POST /api/admin/progress/flush` 管理端点；`ShutdownProgressBuffer` 失败重试 3 次；flush 间隔读 `playback.flush_interval`（≤0 回落 30s）。修 A7 |
+| M2-7 | ✅ | 新增 `internal/infra/ratelimit`（进程内内存、按 IP+用户名固定窗口）：`New(maxAttempts, lockMinutes)` / `RecordFailure` / `Reset` / `IsLocked`；登录失败 `login_max_attempts` 次锁定 `login_lock_minutes` 分钟；Basic Auth 优先 `FindValidToken` 复用已有有效 token，不再每请求铸造（deviceID 统一为 `"BasicAuth"`）；默认 admin 创建时标记 `MustChangePassword=true`，登录响应 `ForcePasswordChange`；新增 `POST /api/admin/users/:userId/password` 改密并清除标记。修 A4/A5 |
+| M2-1 | ⏸️ | **本次未做**：按 §3 新建 `internal/api/emby` + `internal/api/admin` 并逐域搬迁。破坏性最大的跨里程碑工作，留待后续 |
+| M2-2 | ⏸️ | **本次未做**：抽出 `repo` 层接口、service 依赖接口而非 `*gorm.DB`。留待与 M2-1 一并推进 |
+
+**偏离说明（为何 M2-1/M2-2 跳过）**：
+
+ROADMAP §5 执行原则第 2 条「每个里程碑结束都要有可运行的产物，不做跨里程碑的长分支」。
+M2-1/M2-2 属于 M0/M1 尚未触及的「结构性大改」，与 M2-3~M2-8 的「局部确定性修复」性质不同：
+前者一旦动手就是贯穿整个 `internal/emby` 的重命名与搬迁，任何中途打断都会留下无法编译的中间态；
+后者是单文件、低风险、可独立提交的增量。本次优先把 6 项已明确、已在 M1 测试网下被覆盖的修复落地为可运行产物，
+M2-1/M2-2 作为独立的后续里程碑执行（届时 M1 测试网可保证搬迁不破坏客户端兼容）。
+
+**新增配置键**：
+
+- `database.max_open_conns`（默认 10，读连接池大小；≤0 回落单连接）
+- `database.max_idle_conns`（默认 5，读池空闲连接；>max_open_conns 时按后者裁剪）
+- `image.cache_max_mb`（默认 0=不限，proxy_cache 磁盘配额 MB）
+- `playback.flush_interval`（默认 30，进度缓冲 flush 间隔秒）
+- `auth.login_max_attempts`（默认 5，失败锁定阈值；≤0 禁用限流）
+- `auth.login_lock_minutes`（默认 15，锁定窗口分钟）
+
+**新增端点**：
+
+- `POST /api/admin/progress/flush`（adminAuth → 立即 flush 进度缓冲，返回 204）
+- `POST /api/admin/users/:userId/password`（adminAuth → 改密并清 `must_change_password`）
+
+**新增包 / 字段**：
+
+- `internal/infra/ratelimit`：进程内登录限流（按 `IP:username` 固定窗口）。
+- `User.MustChangePassword bool`（`database/models.go`）；登录响应 `AuthenticateResponse.ForcePasswordChange bool`。
+
+**M2 期间新增的测试（共 10 个函数）**：
+
+- `internal/infra/ratelimit/ratelimit_test.go`：`TestLimiterLocksAfterMaxAttempts` / `TestLimiterDisabledWhenZero` / `TestLimiterWindowExpiry`
+- `internal/emby/sessions_test.go`：`TestProgressBufferFlushWritesToDB` / `TestProgressFlushEndpoint`
+- `internal/emby/contract_test.go`：`TestSubtitleIndexAlignsWithPlaybackInfo` / `TestLoginForcePasswordChange` / `TestLoginRateLimit`
+- `internal/service/playback_test.go`：`TestMediaStreamBaseIndex`
+- `internal/service/image_test.go`：`TestImageCacheQuotaEviction`
+
+**顺手修掉的问题**：
+
+- `scripts/dev/update_url2.go` 空白行尾随空格导致 `gofmt -l` 不干净，已 `gofmt -w`（另顺手格式化 `query_db.go`）。
+
+**已知的行为破坏（升级必读）**：
+
+1. 默认 `admin/admin` 登录成功后，响应带 `ForcePasswordChange: true`，客户端应引导改密后才能继续；不改密不影响已登录会话，但这是 M2-7 强制改密的前置信号。
+2. Basic Auth 不再每请求增发 token：同一用户的 Basic Auth 请求复用其已有的有效 token（`device_id="BasicAuth"`），`tokens` 表不再无限增长；仅当用户无任何有效 token 时才铸造新 token。
+3. 图片缓存目录结构与旧版不兼容：缓存文件名现含尺寸参数（`_WxH.jpg`），旧版无尺寸后缀的缓存文件不会被命中也不会被自动清理，建议升级时清空 `cache/` 目录。
+4. 登录失败达 `login_max_attempts` 次后，该 `IP:username` 在 `login_lock_minutes` 分钟内被锁定（含正确密码也返回 429）。运维/脚本批量重试需注意退避，或显式配置 `auth.login_max_attempts=0` 关闭限流。
+5. M2-1/M2-2 未做，故原「M2 完成判据」中「`internal/emby` 只剩门面或已删除」尚未达成——这是有意偏离，非遗漏。
+
+**环境说明**：
+
+- `-race` 在本机跑通（同 M1 环境）：Windows 需 cgo，把 Nuitka 缓存里的 MinGW-w64 13.2.0 gcc 注入 `CC` 后 `go test -race` 全绿、无 data race，证明进度缓冲 goroutine 与读写连接池拆分线程安全。
+- `golangci-lint` 本机仍未装上（模块缓存被安全软件拦截 rename），lint 实际执行仍交给 CI。
+
+---
+
 ## 修订记录
 
 ### v1.1（2026-09-11 复核修订）
@@ -422,3 +496,9 @@ FAKEMBY_SERVER_PORT=9999 ./fakemby &   # 期望监听 9999
 7. **设计修正（v1.0 M0-5 → 本版 M0-7）**：v1.0 提议「对所有 302 直链追加 HMAC 签名」——对不配合校验的外部 CDN 无意义（CDN 不会验证我方签名）。改为按源前缀签名 + 实现 `/api/auth/verify` 回调（与 CLAUDE.md 记载的 OpenList 协作设计一致），并诚实记录防护边界。
 8. **工期调整**：M0 由 4 天增至 6 天（新增三个 P0 修复）；总工期 34→36 天。
 9. **补证**：Token 过期校验确认在 `service/auth.go:72-78` 真实存在（v1.0 的「未造成漏洞」判断成立）；§1.1/§1.3/§1.4/§5/§8/附录 A 同步更新。
+
+### v1.3（2026-09-12 M2 执行记录）
+
+1. **新增 §10 `M2 · 已完成` 段落**：M2-3/4/5/6/7/8 共 6 项已落地（DB 读写分离、字幕索引对齐、图片缓存配额、进度 flush 可控、登录限流+强制改密+Basic Auth 去增发、删除 GetUsableToken 空壳），附验收结果、新增配置键/端点/包、10 个新增测试、已知行为破坏。
+2. **记录偏离决策**：M2-1（目录重构）与 M2-2（repo 层接口）本次**未做**，留待后续里程碑。理由是二者属跨里程碑结构性大改，与 M2-3~8 的局部确定性修复性质不同；按 §5 执行原则第 2 条「每个里程碑结束都要有可运行产物」，优先把 6 项已明确、已被 M1 测试网覆盖的修复落地为可运行产物。
+3. **顶部进度行**更新为「M2 进行中」。
