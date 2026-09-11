@@ -1,8 +1,22 @@
-.claude/
-CLAUDE.md
-.playwright-mcp/
+# 构建产物
+fakemby
 fakemby.exe
 build_test.exe
-fakemby.db
-fakemby.db-shm
-fakemby.db-wal
+*.exe
+dist/
+
+# 运行时数据与日志
+data/
+logs/
+cache/
+
+# 数据库
+*.db
+*.db-shm
+*.db-wal
+
+# 本地工具 / 私有文件
+.claude/
+.playwright-mcp/
+.workbuddy/
+CLAUDE.md
