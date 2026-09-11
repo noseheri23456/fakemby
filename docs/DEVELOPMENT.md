@@ -35,8 +35,13 @@ go fmt ./...          # 格式化
 go vet ./...          # 静态分析
 go test ./...         # 运行测试
 go test -v -cover ./...  # 测试 + 覆盖率
-go test -race ./...   # 竞争检测
+go test -race ./...   # 竞争检测（Windows 需 gcc，见下）
 ```
+
+> **Windows 跑 `-race`**：竞态检测依赖 cgo，需要 gcc。若 gcc 不在 PATH，用
+> `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\test-race.ps1`
+> 自动探测并注入 `CC`。手动方式：`$env:CC='C:\path\to\gcc.exe'; $env:CGO_ENABLED='1'; go test -race ./...`
+> （把 gcc 目录加进 PATH 对 Go 的子进程无效，必须走 `CC` 绝对路径。）
 
 ## 测试
 

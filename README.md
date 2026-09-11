@@ -78,11 +78,23 @@ M1 已建立测试与 CI 基线，常用命令：
 
 ```bash
 go test ./...                     # 全量测试（含契约测试与安全回归）
-go test -race ./...               # 带竞态检测（CI 用；Windows 需先装 gcc）
+go test -race ./...               # 带竞态检测（Windows 见下方说明）
 go test ./internal/service/... -cover        # service 层覆盖率（当前 71%）
 go test ./tests/integration/... -v           # 端到端冒烟（10 步，进程内起服务）
 go test ./internal/types/... -update         # 重写 DTO golden 文件
 golangci-lint run                            # 静态检查（配置见 .golangci.yml）
+```
+
+Windows 上 `-race` 需要 cgo，也就是需要一个 gcc。若 gcc 不在 PATH 中（例如只有 Nuitka 缓存里的那份 MinGW），用项目自带的脚本自动探测：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\test-race.ps1
+```
+
+它会依次查找 `$env:CC`、PATH、常见安装位置（Nuitka 缓存 / TDM-GCC / MSYS2 / mingw64 / Chocolatey），找到后通过 `CC` 环境变量传给 `go`。也可以手动指定：
+
+```powershell
+$env:CC = 'C:\path\to\gcc.exe'; $env:CGO_ENABLED = '1'; go test -race ./...
 ```
 
 对活体服务跑同一套冒烟：

@@ -401,7 +401,8 @@ FAKEMBY_SERVER_PORT=9999 ./fakemby &   # 期望监听 9999
 
 **环境说明**：
 
-- 本机（Windows）没有 gcc，`go test -race` 无法运行（`CGO_ENABLED=1` 也缺 C 编译器），CI 的 Linux runner 上正常。本地验证请用 `go test ./...`。
+- **`-race` 已在本机跑通**（2026-09-12 补记）：Windows 上竞态检测需要 cgo，本机 gcc 位于 Nuitka 缓存目录（MinGW-w64 13.2.0，不在 PATH 中），直接 `go test -race` 会报 `cgo: C compiler "gcc" not found`。已新增 `scripts/dev/test-race.ps1`：自动探测 gcc（`$env:CC` → PATH → 常见安装位置）并注入 `CC` 后执行 `go test -race -count=1 ./...`。**全量 `-race` 结果：5 个有测试的包全部 ok，无 data race。**
+- 注意：往 `PATH` 里塞 gcc 目录对 Go 的子进程不生效，必须用 `CC=<绝对路径>` 传给 `go`。
 - `golangci-lint` 二进制在本机未能装上（模块缓存被安全软件拦截 rename），因此本地只跑了 `errcheck` 等价检查；lint 的实际执行交给 CI。
 
 ---
