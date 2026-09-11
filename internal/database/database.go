@@ -132,8 +132,26 @@ func createDefaultAdmin(d *gorm.DB) error {
 	return nil
 }
 
+// Migrate 执行自动迁移与索引创建。
+// 抽出来是为了让测试与运维脚本能在不触发默认管理员创建的前提下建表。
+func Migrate(d *gorm.DB) error {
+	if err := autoMigrate(d); err != nil {
+		return fmt.Errorf("自动迁移失败: %w", err)
+	}
+	if err := createIndexes(d); err != nil {
+		return fmt.Errorf("创建索引失败: %w", err)
+	}
+	return nil
+}
+
 func Get() *gorm.DB {
 	return db
+}
+
+// Set 注入全局数据库句柄。
+// 仅供测试使用——正式启动必须走 Init（它还会建索引、建默认管理员）。
+func Set(d *gorm.DB) {
+	db = d
 }
 
 func Close() error {

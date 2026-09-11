@@ -52,7 +52,7 @@ func submitCustomQuery() gin.HandlerFunc {
 			})
 			return
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 
 		columns, err := rows.Columns()
 		if err != nil {

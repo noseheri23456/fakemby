@@ -51,7 +51,11 @@ func main() {
 		logger.Error("数据库初始化失败", "error", err)
 		os.Exit(1)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			logger.Error("关闭数据库失败", "error", err)
+		}
+	}()
 
 	// 启动 Token 过期清理
 	database.StartTokenCleanupRoutine(cfg.Auth.TokenExpiryDays)
@@ -163,7 +167,7 @@ func handleWebSocket(c *gin.Context) {
 	}
 
 	go func() {
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		for {
 			// read messages and ignore to keep connection alive
 			_, err := buf.ReadByte()

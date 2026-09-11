@@ -74,7 +74,7 @@ func (s *ImageService) getImageFromCache(image database.Image, maxWidth, maxHeig
 		slog.Error("下载图片失败", "error", err, "url", image.URL)
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// 创建缓存文件
 	file, err := os.Create(cachePath)
@@ -82,12 +82,12 @@ func (s *ImageService) getImageFromCache(image database.Image, maxWidth, maxHeig
 		slog.Error("创建缓存文件失败", "error", err)
 		return "", err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// 写入文件
 	if _, err := io.Copy(file, resp.Body); err != nil {
 		slog.Error("写入缓存文件失败", "error", err)
-		os.Remove(cachePath) // 删除不完整的文件
+		_ = os.Remove(cachePath) // 删除不完整的文件
 		return "", err
 	}
 

@@ -76,18 +76,10 @@ func (s *PlaybackService) MarkAsPlayed(userID, itemID string) error {
 		Error
 }
 
-// UnmarkAsPlayed 取消已看标记
+// UnmarkAsPlayed 取消已看标记。
+// 没有可更新的记录（用户本来就没标记过）不算错误。
 func (s *PlaybackService) UnmarkAsPlayed(userID, itemID string) error {
-	result := s.db.Where("user_id = ? AND item_id = ?", userID, itemID).
-		Update("is_played", false)
-	if result.Error != nil {
-		// 忽略 "no rows" 错误（没有记录无需取消标记）
-		if result.RowsAffected == 0 {
-			return nil
-		}
-		return result.Error
-	}
-	return nil
+	return s.toggleFlag(userID, itemID, "is_played", false)
 }
 
 // MarkAsFavorite 标记为收藏
@@ -110,10 +102,21 @@ func (s *PlaybackService) MarkAsFavorite(userID, itemID string) error {
 	return s.db.Model(&progress).Update("is_favorite", true).Error
 }
 
-// UnmarkAsFavorite 取消收藏
+// UnmarkAsFavorite 取消收藏。
+// 没有可更新的记录（用户本来就没收藏）不算错误。
 func (s *PlaybackService) UnmarkAsFavorite(userID, itemID string) error {
-	result := s.db.Where("user_id = ? AND item_id = ?", userID, itemID).
-		Update("is_favorite", false)
+	return s.toggleFlag(userID, itemID, "is_favorite", false)
+}
+
+// toggleFlag 把 user_id+item_id 定位到的进度记录上的布尔字段置为指定值。
+//
+// 踩过的坑：直接 s.db.Where(...).Update(...) 而不指定 Model，gorm 拼出的 UPDATE
+// 语句没有表名，执行必然报错；旧代码又把"RowsAffected == 0"当成成功吞掉，
+// 导致"取消已看 / 取消收藏"静默失效——用户点了没反应，服务端还返回 200。
+func (s *PlaybackService) toggleFlag(userID, itemID, column string, value bool) error {
+	result := s.db.Model(&database.PlayProgress{}).
+		Where("user_id = ? AND item_id = ?", userID, itemID).
+		Update(column, value)
 	if result.Error != nil {
 		if result.RowsAffected == 0 {
 			return nil

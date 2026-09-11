@@ -120,28 +120,28 @@ type Token struct {
 
 // PlaybackActivity 播放活动 (供 Emby 统计插件兼容)
 type PlaybackActivity struct {
-	ID             uint      `gorm:"primaryKey;autoIncrement"`
-	DateCreated    time.Time `gorm:"autoCreateTime"`
-	UserID         string    `gorm:"column:UserId;index"`
-	ItemID         string    `gorm:"column:ItemId;index"`
-	ItemType       string    `gorm:"column:ItemType;index"`
-	ItemName       string    `gorm:"column:ItemName"`
-	PlayDuration   int       `gorm:"column:PlayDuration"`
-	PauseDuration  int       `gorm:"column:PauseDuration"`
-	ClientName     string    `gorm:"column:ClientName"`
-	DeviceName     string    `gorm:"column:DeviceName"`
-	DeviceID       string    `gorm:"column:DeviceId"`
-	RemoteAddress  string    `gorm:"column:RemoteAddress"`
+	ID            uint      `gorm:"primaryKey;autoIncrement"`
+	DateCreated   time.Time `gorm:"autoCreateTime"`
+	UserID        string    `gorm:"column:UserId;index"`
+	ItemID        string    `gorm:"column:ItemId;index"`
+	ItemType      string    `gorm:"column:ItemType;index"`
+	ItemName      string    `gorm:"column:ItemName"`
+	PlayDuration  int       `gorm:"column:PlayDuration"`
+	PauseDuration int       `gorm:"column:PauseDuration"`
+	ClientName    string    `gorm:"column:ClientName"`
+	DeviceName    string    `gorm:"column:DeviceName"`
+	DeviceID      string    `gorm:"column:DeviceId"`
+	RemoteAddress string    `gorm:"column:RemoteAddress"`
 }
 
-func (Library) TableName() string      { return "libraries" }
-func (MediaItem) TableName() string    { return "media_items" }
-func (MediaSource) TableName() string  { return "media_sources" }
-func (Image) TableName() string        { return "images" }
-func (Subtitle) TableName() string     { return "subtitles" }
-func (User) TableName() string         { return "users" }
-func (PlayProgress) TableName() string { return "play_progress" }
-func (Token) TableName() string        { return "tokens" }
+func (Library) TableName() string          { return "libraries" }
+func (MediaItem) TableName() string        { return "media_items" }
+func (MediaSource) TableName() string      { return "media_sources" }
+func (Image) TableName() string            { return "images" }
+func (Subtitle) TableName() string         { return "subtitles" }
+func (User) TableName() string             { return "users" }
+func (PlayProgress) TableName() string     { return "play_progress" }
+func (Token) TableName() string            { return "tokens" }
 func (PlaybackActivity) TableName() string { return "PlaybackActivity" }
 
 // GetUsableToken 返回有效的 Token（不包括过期的）

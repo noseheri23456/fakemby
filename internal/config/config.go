@@ -199,6 +199,12 @@ func Get() *Config {
 	return globalConfig
 }
 
+// SetGlobal 直接设置全局配置。
+// 仅供测试与进程内嵌场景使用；正式启动请走 Load（它负责环境变量覆盖与默认值）。
+func SetGlobal(c *Config) {
+	globalConfig = c
+}
+
 func (c *Config) PrintConfig() {
 	logger := slog.Default()
 	logger.Info("=== FakEmby 配置 ===")

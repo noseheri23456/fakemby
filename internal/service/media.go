@@ -124,7 +124,7 @@ func (s *MediaService) GetItems(userID string, parentID *string, recursive bool,
 	if sortBy != "" {
 		sortFields := strings.Split(sortBy, ",")
 		var orderClauses []string
-		
+
 		for _, field := range sortFields {
 			field = strings.TrimSpace(field)
 			switch strings.ToLower(field) {
@@ -147,7 +147,7 @@ func (s *MediaService) GetItems(userID string, parentID *string, recursive bool,
 				slog.Debug("忽略不支持的排序字段", "field", field)
 			}
 		}
-		
+
 		if len(orderClauses) > 0 {
 			query = query.Order(strings.Join(orderClauses, ", "))
 		}
@@ -230,26 +230,26 @@ func (s *MediaService) ItemToDTO(item *database.MediaItem, userID string, includ
 
 	// 简化的 DTO，只包含必需字段
 	dto := &types.BaseItemDto{
-		ID:               item.ID,
-		Name:             item.Name,
-		Type:             item.Type,
-		IsFolder:         item.Type == "Series" || item.Type == "Season" || item.Type == "Folder" || item.Type == "CollectionFolder" || item.Type == "Person" || item.Type == "Genre" || item.Type == "Studio",
-		CanDelete:        !(item.Type == "Series" || item.Type == "Season" || item.Type == "Folder"),
-		CanDownload:      !(item.Type == "Series" || item.Type == "Season" || item.Type == "Folder"),
-		SupportsSync:     true,
-		Genres:           []string{},
-		Studios:          []types.NameIdPair{},
-		Tags:             []string{},
-		Taglines:         []string{},
-		People:           []types.PersonInfo{},
-		ImageTags:        map[string]string{},
+		ID:                item.ID,
+		Name:              item.Name,
+		Type:              item.Type,
+		IsFolder:          item.Type == "Series" || item.Type == "Season" || item.Type == "Folder" || item.Type == "CollectionFolder" || item.Type == "Person" || item.Type == "Genre" || item.Type == "Studio",
+		CanDelete:         !(item.Type == "Series" || item.Type == "Season" || item.Type == "Folder"),
+		CanDownload:       !(item.Type == "Series" || item.Type == "Season" || item.Type == "Folder"),
+		SupportsSync:      true,
+		Genres:            []string{},
+		Studios:           []types.NameIdPair{},
+		Tags:              []string{},
+		Taglines:          []string{},
+		People:            []types.PersonInfo{},
+		ImageTags:         map[string]string{},
 		BackdropImageTags: []string{},
-		MediaSources:     []types.MediaSourceDto{},
-		ProviderIds:      map[string]string{},
-		RemoteTrailers:   []types.ExternalUrl{},
-		ExternalUrls:     []types.ExternalUrl{},
-		LockedFields:     []string{},
-		GenreItems:       []types.NameIdPair{},
+		MediaSources:      []types.MediaSourceDto{},
+		ProviderIds:       map[string]string{},
+		RemoteTrailers:    []types.ExternalUrl{},
+		ExternalUrls:      []types.ExternalUrl{},
+		LockedFields:      []string{},
+		GenreItems:        []types.NameIdPair{},
 	}
 
 	serverCfg := config.Get().Server
@@ -632,14 +632,21 @@ func (s *MediaService) enrichInheritedImages(dto *types.BaseItemDto, itemID stri
 			case "backdrop":
 				if !hasOwnBackdrop && img.Tag != "" {
 					dto.BackdropImageTags = append(dto.BackdropImageTags, img.Tag)
+					// 必须同时给出来源 item id：客户端要拿它拼 /Items/{id}/Images/Backdrop，
+					// 只给 tag 不给 id 会让剧集背景图 404。
+					dto.ParentBackdropItemID = grandParentID
 				}
 			case "logo":
 				if !hasOwnLogo && img.Tag != "" {
 					dto.ImageTags["Logo"] = img.Tag
+					dto.ParentLogoItemID = grandParentID
+					dto.ParentLogoImageTag = img.Tag
 				}
 			case "thumb":
 				if !hasOwnThumb && img.Tag != "" {
 					dto.ImageTags["Thumb"] = img.Tag
+					dto.ParentThumbItemID = grandParentID
+					dto.ParentThumbImageTag = img.Tag
 				}
 			}
 		}
@@ -656,29 +663,29 @@ func (s *MediaService) enrichMediaSources(dto *types.BaseItemDto, itemID string)
 	for _, src := range sources {
 		isHttp := strings.HasPrefix(src.URL, "http://") || strings.HasPrefix(src.URL, "https://")
 		sourceDto := types.MediaSourceDto{
-			ID:                  src.ID,
-			Name:                src.Name,
-			Path:                src.URL,
-			Protocol:            src.Protocol,
-			Type:                "Default",
-			Container:           src.Container,
-			Size:                src.Size,
-			Bitrate:             src.Bitrate,
-			RunTimeTicks:        dto.RunTimeTicks,
-			IsRemote:            isHttp,
-			HasMixedProtocols:   false,
-			SupportsTranscoding: false,
-			SupportsDirectStream: isHttp,
-			SupportsDirectPlay:  isHttp,
-			IsInfiniteStream:    false,
-			RequiresOpening:     false,
-			RequiresClosing:     false,
-			RequiresLooping:     false,
-			SupportsProbing:     true,
-			MediaStreams:        []types.MediaStreamDto{},
+			ID:                    src.ID,
+			Name:                  src.Name,
+			Path:                  src.URL,
+			Protocol:              src.Protocol,
+			Type:                  "Default",
+			Container:             src.Container,
+			Size:                  src.Size,
+			Bitrate:               src.Bitrate,
+			RunTimeTicks:          dto.RunTimeTicks,
+			IsRemote:              isHttp,
+			HasMixedProtocols:     false,
+			SupportsTranscoding:   false,
+			SupportsDirectStream:  isHttp,
+			SupportsDirectPlay:    isHttp,
+			IsInfiniteStream:      false,
+			RequiresOpening:       false,
+			RequiresClosing:       false,
+			RequiresLooping:       false,
+			SupportsProbing:       true,
+			MediaStreams:          []types.MediaStreamDto{},
 			ReadAtNativeFramerate: false,
-			Formats:             []string{},
-			RequiredHttpHeaders: map[string]string{},
+			Formats:               []string{},
+			RequiredHttpHeaders:   map[string]string{},
 		}
 		if src.Protocol == "" {
 			sourceDto.Protocol = "Http"
@@ -694,12 +701,12 @@ func shouldIncludeField(fields []string, fieldName string) bool {
 
 	// 核心字段始终返回（客户端渲染必需）
 	coreFields := map[string]bool{
-		"ImageTags":                true,
-		"BackdropImageTags":        true,
-		"UserData":                 true,
-		"MediaType":                true,
-		"MediaSources":             true,
-		"PrimaryImageAspectRatio":  true,
+		"ImageTags":               true,
+		"BackdropImageTags":       true,
+		"UserData":                true,
+		"MediaType":               true,
+		"MediaSources":            true,
+		"PrimaryImageAspectRatio": true,
 	}
 	if coreFields[fieldName] {
 		return true
@@ -878,9 +885,9 @@ func (s *MediaService) getLibrariesAsItems() ([]database.MediaItem, int64, error
 	items := make([]database.MediaItem, 0, len(libs))
 	for _, lib := range libs {
 		item := database.MediaItem{
-			ID:        lib.ID,
-			Name:      lib.Name,
-			Type:      "CollectionFolder",
+			ID:   lib.ID,
+			Name: lib.Name,
+			Type: "CollectionFolder",
 		}
 		if lib.Type == "tvshows" {
 			item.Type = "CollectionFolder"

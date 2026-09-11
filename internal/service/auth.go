@@ -59,7 +59,7 @@ func (s *AuthService) VerifyToken(token string, expiryDays int) (*database.Token
 	var t database.Token
 	if err := s.db.Where("token = ?", token).First(&t).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			slog.Error("Token 未找到", "token_prefix", token[:16]+"...")
+			slog.Error("Token 未找到", "token_prefix", tokenPrefix(token))
 			return nil, ErrInvalidToken
 		}
 		slog.Error("查询 Token 失败", "error", err)
@@ -71,7 +71,7 @@ func (s *AuthService) VerifyToken(token string, expiryDays int) (*database.Token
 	// 检查令牌是否过期
 	cutoffTime := time.Now().AddDate(0, 0, -expiryDays)
 	if t.CreatedAt.Before(cutoffTime) {
-		slog.Warn("Token 已过期", "token_prefix", token[:16]+"...", "createdAt", t.CreatedAt, "cutoffTime", cutoffTime)
+		slog.Warn("Token 已过期", "token_prefix", tokenPrefix(token), "createdAt", t.CreatedAt, "cutoffTime", cutoffTime)
 		// 删除过期令牌
 		s.db.Delete(&t)
 		return nil, ErrTokenExpired
@@ -104,6 +104,15 @@ var (
 	ErrTokenExpired       = &AuthError{Code: "TOKEN_EXPIRED", Message: "Token has expired"}
 	ErrUserNotFound       = &AuthError{Code: "USER_NOT_FOUND", Message: "User not found"}
 )
+
+// tokenPrefix 取 token 前若干位用于日志定位。
+// 不能写成 token[:16]：客户端可能传任意短字符串（甚至 1 个字符），会直接越界 panic。
+func tokenPrefix(token string) string {
+	if len(token) <= 16 {
+		return "***"
+	}
+	return token[:16] + "..."
+}
 
 type AuthError struct {
 	Code    string

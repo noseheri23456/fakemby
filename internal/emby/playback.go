@@ -229,7 +229,9 @@ func getPlaybackInfo(mediaSvc *service.MediaService, playbackSvc *service.Playba
 
 			// M0-4 / S3：DirectStreamUrl 不再拼接 api_key（长期 token 会泄漏到
 			// 浏览器历史、反代 access log 与 Referer）。改为签发带时效的签名参数。
-			streamURL := fmt.Sprintf("/Videos/%s/stream?Static=true&mediaSourceId=%s", itemID, src.ID)
+			// 路径必须带 /emby 前缀：本服务所有端点都挂在 /emby 下，
+			// 客户端是拿这个 URL 直接起播的，少了前缀就是 404。
+			streamURL := fmt.Sprintf("/emby/Videos/%s/stream?Static=true&mediaSourceId=%s", itemID, src.ID)
 			if sgn != nil && cfg.ShouldSign(src.URL) {
 				exp, sig, err := sgn.Sign(signer.Payload{
 					MediaType: "video",
