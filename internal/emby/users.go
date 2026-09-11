@@ -35,6 +35,11 @@ func RegisterUserRoutes(router *gin.Engine, cfg *config.Config) {
 	router.GET("/emby/DisplayPreferences/usersettings", auth, func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"CustomPrefs": gin.H{}})
 	})
+	// 官方 Emby 客户端登录/自定义主页后会 POST 保存显示偏好；
+	// 仅接受并丢弃（本项目无持久化需求），返回 204 与官方行为一致。
+	router.POST("/emby/DisplayPreferences/usersettings", auth, func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
 }
 
 // RequireAdmin checks if the user has admin privileges

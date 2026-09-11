@@ -155,13 +155,17 @@ func RegisterAuthRoutes(router *gin.Engine, cfg *config.Config) {
 	// 认证端点（PascalCase）
 	router.POST("/emby/Users/AuthenticateByName", authenticateByName(authSvc, cfg))
 	router.GET("/emby/Users/Public", getUsersPublic())
-	router.GET("/emby/Users/Current", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), getCurrentUser(authSvc))
+	router.GET("/emby/Users/Current", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), getCurrentUser(authSvc, cfg))
+	// 官方 Emby 客户端（移动端/桌面端/电视端）登录后通过 Users/Me 拉取当前用户完整档案，
+	// 缺失会导致客户端无法初始化用户上下文 → 空白主页。第三方纯播放器不依赖此端点。
+	router.GET("/emby/Users/Me", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), getCurrentUser(authSvc, cfg))
 	router.POST("/emby/Sessions/Logout", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), logout(authSvc))
 
 	// 认证端点（小写版本，兼容官方 Emby 客户端）
 	router.POST("/emby/users/authenticatebyname", authenticateByName(authSvc, cfg))
 	router.GET("/emby/users/public", getUsersPublic())
-	router.GET("/emby/users/current", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), getCurrentUser(authSvc))
+	router.GET("/emby/users/current", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), getCurrentUser(authSvc, cfg))
+	router.GET("/emby/users/me", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), getCurrentUser(authSvc, cfg))
 	router.POST("/emby/sessions/logout", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), logout(authSvc))
 
 	// 调试端点：仅在 debug 日志级别下注册（M0-4）
@@ -337,7 +341,7 @@ func getUsersPublic() gin.HandlerFunc {
 	}
 }
 
-func getCurrentUser(authSvc *service.AuthService) gin.HandlerFunc {
+func getCurrentUser(authSvc *service.AuthService, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.GetString("user_id")
 		user, err := authSvc.GetUserByID(userID)
@@ -349,6 +353,7 @@ func getCurrentUser(authSvc *service.AuthService) gin.HandlerFunc {
 		resp := UserDTO{
 			ID:                        user.ID,
 			Name:                      user.Name,
+			ServerID:                  cfg.Server.ID,
 			HasPassword:               user.PasswordHash != "",
 			HasConfiguredPassword:     user.PasswordHash != "",
 			HasConfiguredEasyPassword: false,

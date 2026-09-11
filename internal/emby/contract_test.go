@@ -62,6 +62,38 @@ func TestAuthenticateByNameRejectsWrongPassword(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, r.Status)
 }
 
+// 官方 Emby 客户端（移动/桌面/电视端）登录后通过 Users/Me 拉取当前用户完整档案，
+// 缺失该端点会导致客户端无法初始化用户上下文 → 空白主页。第三方纯播放器不依赖它，
+// 所以此前用小幻影视等测试未暴露。
+func TestUsersMeEndpoint(t *testing.T) {
+	a, env := newAPI(t)
+
+	// 未带 token 必须 401：不能匿名枚举用户档案
+	assert.Equal(t, http.StatusUnauthorized, a.get("/emby/Users/Me", "").Status)
+
+	r := a.get("/emby/Users/Me", testutil.NormalToken)
+	require.Equal(t, http.StatusOK, r.Status)
+
+	body := r.JSON(t)
+	assert.Equal(t, testutil.NormalUserID, body["Id"])
+	// ServerId 必须与 System/Info 一致，官方客户端靠它把用户关联到服务器
+	assert.Equal(t, env.Cfg.Server.ID, body["ServerId"])
+	assert.Contains(t, body, "Policy")
+	assert.Contains(t, body, "Configuration")
+
+	// 官方客户端使用小写路径
+	assert.Equal(t, http.StatusOK, a.get("/emby/users/me", testutil.NormalToken).Status)
+}
+
+// 官方客户端登录/自定义主页后会 POST 保存显示偏好；404 可能中断首页初始化流程。
+func TestDisplayPreferencesPostAccepted(t *testing.T) {
+	a, _ := newAPI(t)
+
+	r := a.post("/emby/DisplayPreferences/usersettings", testutil.NormalToken,
+		[]byte(`{"CustomPrefs":{"homesection0":"librarytiles"}}`))
+	require.Equal(t, http.StatusNoContent, r.Status)
+}
+
 func TestGetViews(t *testing.T) {
 	a, _ := newAPI(t)
 
