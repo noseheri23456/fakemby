@@ -19,10 +19,10 @@ import (
 func RegisterItemRoutes(router *gin.Engine, cfg *config.Config) {
 	mediaSvc := service.NewMediaService(database.Get())
 
-	viewsHandler := getViews(mediaSvc)
+	viewsHandler := getViews(mediaSvc, cfg)
 	foldersHandler := getFolders(mediaSvc)
 	itemsHandler := getItems(mediaSvc)
-	itemHandler := getItem(mediaSvc)
+	itemHandler := getItem(mediaSvc, cfg)
 	latestHandler := getLatest(mediaSvc)
 	countsHandler := getItemCounts(mediaSvc)
 	authMiddleware := AuthTokenMiddleware(cfg.Auth.TokenExpiryDays)
@@ -67,7 +67,7 @@ func RegisterItemRoutes(router *gin.Engine, cfg *config.Config) {
 	router.GET("/emby/Persons", authMiddleware, getPersons())
 }
 
-func getViews(mediaSvc *service.MediaService) gin.HandlerFunc {
+func getViews(mediaSvc *service.MediaService, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.GetString("user_id")
 		paramUserID := c.Param("userId")
@@ -87,57 +87,10 @@ func getViews(mediaSvc *service.MediaService) gin.HandlerFunc {
 			return
 		}
 
-		cfg := config.Get()
-		ratio := 1.7777777777777777
-
 		// 转换为 DTO
 		items := make([]types.BaseItemDto, 0, len(libraries))
 		for _, lib := range libraries {
-			subviews := []string{lib.Type, "tags", "genres", "folders"}
-			now := time.Now().UTC().Format(time.RFC3339Nano)
-			dto := types.BaseItemDto{
-				ID:                      lib.ID,
-				Name:                    lib.Name,
-				Guid:                    lib.ID,
-				Etag:                    fmt.Sprintf("%032x", time.Now().UnixNano()),
-				Type:                    "CollectionFolder",
-				IsFolder:                true,
-				CollectionType:          lib.Type,
-				SortName:                lib.Name,
-				ForcedSortName:          lib.Name,
-				ServerID:                cfg.Server.ID,
-				CanDelete:               false,
-				CanDownload:             false,
-				SupportsSync:            true,
-				LockData:                false,
-				ParentID:                "2",
-				Subviews:                subviews,
-				DateCreated:             now,
-				DateModified:            now,
-				PrimaryImageAspectRatio: &ratio,
-				ImageTags:               map[string]string{},
-				BackdropImageTags:       []string{},
-				MediaSources:            []types.MediaSourceDto{},
-				ProviderIds:             map[string]string{},
-				RemoteTrailers:          []types.ExternalUrl{},
-				ExternalUrls:            []types.ExternalUrl{},
-				LockedFields:            []string{},
-				GenreItems:              []types.NameIdPair{},
-				Genres:                  []string{},
-				Studios:                 []types.NameIdPair{},
-				Tags:                    []string{},
-				Taglines:                []string{},
-				People:                  []types.PersonInfo{},
-				PresentationUniqueKey:   lib.ID,
-				DisplayPreferencesId:    lib.ID,
-				UserData: &types.UserItemDataDto{
-					PlaybackPositionTicks: 0,
-					PlayCount:             0,
-					IsFavorite:            false,
-					Played:                false,
-				},
-			}
-			items = append(items, dto)
+			items = append(items, libraryToDTO(cfg, lib))
 		}
 		resp := types.ItemsResponse{
 			Items:            items,
@@ -146,6 +99,55 @@ func getViews(mediaSvc *service.MediaService) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, resp)
+	}
+}
+
+// libraryToDTO 把媒体库转换为 CollectionFolder DTO（Views 与条目详情共用，
+// 保证两个端点返回的同一媒体库字段完全一致）。
+func libraryToDTO(cfg *config.Config, lib database.Library) types.BaseItemDto {
+	ratio := 1.7777777777777777
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	return types.BaseItemDto{
+		ID:                      lib.ID,
+		Name:                    lib.Name,
+		Guid:                    lib.ID,
+		Etag:                    fmt.Sprintf("%032x", time.Now().UnixNano()),
+		Type:                    "CollectionFolder",
+		IsFolder:                true,
+		CollectionType:          lib.Type,
+		SortName:                lib.Name,
+		ForcedSortName:          lib.Name,
+		ServerID:                cfg.Server.ID,
+		CanDelete:               false,
+		CanDownload:             false,
+		SupportsSync:            true,
+		LockData:                false,
+		ParentID:                "2",
+		Subviews:                []string{lib.Type, "tags", "genres", "folders"},
+		DateCreated:             now,
+		DateModified:            now,
+		PrimaryImageAspectRatio: &ratio,
+		ImageTags:               map[string]string{},
+		BackdropImageTags:       []string{},
+		MediaSources:            []types.MediaSourceDto{},
+		ProviderIds:             map[string]string{},
+		RemoteTrailers:          []types.ExternalUrl{},
+		ExternalUrls:            []types.ExternalUrl{},
+		LockedFields:            []string{},
+		GenreItems:              []types.NameIdPair{},
+		Genres:                  []string{},
+		Studios:                 []types.NameIdPair{},
+		Tags:                    []string{},
+		Taglines:                []string{},
+		People:                  []types.PersonInfo{},
+		PresentationUniqueKey:   lib.ID,
+		DisplayPreferencesId:    lib.ID,
+		UserData: &types.UserItemDataDto{
+			PlaybackPositionTicks: 0,
+			PlayCount:             0,
+			IsFavorite:            false,
+			Played:                false,
+		},
 	}
 }
 
@@ -334,7 +336,7 @@ func getItems(mediaSvc *service.MediaService) gin.HandlerFunc {
 	}
 }
 
-func getItem(mediaSvc *service.MediaService) gin.HandlerFunc {
+func getItem(mediaSvc *service.MediaService, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.GetString("user_id")
 		itemID := c.Param("itemId")
@@ -342,6 +344,13 @@ func getItem(mediaSvc *service.MediaService) gin.HandlerFunc {
 		// 获取媒体项目
 		item, err := mediaSvc.GetItemByID(itemID)
 		if err != nil {
+			// itemId 可能是媒体库（CollectionFolder）ID：官方客户端点击首页
+			// 媒体库磁贴会请求 /emby/Users/{userId}/Items/{libraryId}，
+			// 详情页的 Promise.all 一旦 404 就显示 "Content no longer available"。
+			if dto, ok := libraryByID(mediaSvc, cfg, itemID); ok {
+				c.JSON(http.StatusOK, dto)
+				return
+			}
 			c.JSON(http.StatusNotFound, ErrNotFound)
 			return
 		}
@@ -352,6 +361,21 @@ func getItem(mediaSvc *service.MediaService) gin.HandlerFunc {
 
 		c.JSON(http.StatusOK, dto)
 	}
+}
+
+// libraryByID 按 ID 查找媒体库并转换为 DTO，找不到返回 ok=false。
+func libraryByID(mediaSvc *service.MediaService, cfg *config.Config, libraryID string) (types.BaseItemDto, bool) {
+	libraries, err := mediaSvc.GetLibraries()
+	if err != nil {
+		slog.Error("获取媒体库失败", "error", err)
+		return types.BaseItemDto{}, false
+	}
+	for _, lib := range libraries {
+		if lib.ID == libraryID {
+			return libraryToDTO(cfg, lib), true
+		}
+	}
+	return types.BaseItemDto{}, false
 }
 
 func getLatest(mediaSvc *service.MediaService) gin.HandlerFunc {

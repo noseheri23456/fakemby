@@ -111,6 +111,31 @@ func TestGetViews(t *testing.T) {
 	assert.NotEmpty(t, first["Id"])
 }
 
+// 官方客户端点击首页媒体库磁贴会请求条目详情端点；
+// 404 会让详情页 Promise.all reject，界面显示 "Content no longer available"。
+func TestLibraryDetailViaItemEndpoint(t *testing.T) {
+	a, _ := newAPI(t)
+
+	for _, libID := range []string{testutil.MovieLibID, testutil.ShowLibID} {
+		r := a.get("/emby/Users/"+testutil.NormalUserID+"/Items/"+libID, testutil.NormalToken)
+		require.Equal(t, http.StatusOK, r.Status, "媒体库 %s 应通过条目详情端点访问", libID)
+
+		body := r.JSON(t)
+		assert.Equal(t, libID, body["Id"])
+		assert.Equal(t, "CollectionFolder", body["Type"])
+		assert.Equal(t, true, body["IsFolder"])
+	}
+
+	// 普通媒体详情仍正常
+	r := a.get("/emby/Users/"+testutil.NormalUserID+"/Items/"+testutil.MovieID, testutil.NormalToken)
+	require.Equal(t, http.StatusOK, r.Status)
+	assert.Equal(t, "Movie", r.JSON(t)["Type"])
+
+	// 不存在的 ID 仍 404
+	assert.Equal(t, http.StatusNotFound,
+		a.get("/emby/Users/"+testutil.NormalUserID+"/Items/no-such-item", testutil.NormalToken).Status)
+}
+
 func TestGetItemsSupportsPagingAndFilters(t *testing.T) {
 	a, _ := newAPI(t)
 
