@@ -17,12 +17,32 @@ func RequestLogMiddleware() gin.HandlerFunc {
 		path := c.Request.URL.Path
 		query := c.Request.URL.RawQuery
 
+		// 慢请求探测：handler 挂死时 c.Next() 永不返回，完成日志也不会打；
+		// 用计时器把超过 3s 仍未完成的请求暴露出来（排查客户端转圈的关键盲区）。
+		done := make(chan struct{})
+		timer := time.AfterFunc(3*time.Second, func() {
+			select {
+			case <-done:
+				return
+			default:
+				slog.Warn("Slow request (still running)",
+					"method", method,
+					"path", path,
+					"query", query,
+					"elapsed_ms", time.Since(startTime).Milliseconds(),
+				)
+			}
+		})
+
 		c.Next()
+		close(done)
+		timer.Stop()
 
 		duration := time.Since(startTime)
 		statusCode := c.Writer.Status()
 
 		logger := slog.Default()
+		// 全量请求日志（含成功请求与 query），排查官方客户端兼容性问题依赖完整轨迹。
 		if statusCode >= 400 {
 			logger.Warn("HTTP Request",
 				"method", method,
@@ -32,9 +52,10 @@ func RequestLogMiddleware() gin.HandlerFunc {
 				"latency_ms", duration.Milliseconds(),
 			)
 		} else {
-			logger.Debug("HTTP Request",
+			logger.Info("HTTP Request",
 				"method", method,
 				"path", path,
+				"query", query,
 				"status", statusCode,
 				"latency_ms", duration.Milliseconds(),
 			)

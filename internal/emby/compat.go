@@ -52,6 +52,9 @@ func RegisterCompatRoutes(router *gin.Engine, cfg *config.Config) {
 
 	// 插件配置页：无插件，返回空数组
 	router.GET("/emby/web/configurationpages", auth, emptyArrayHandler())
+
+	// Custom CSS/JS（Emby Theater 3.0.20 启动序列请求）：无自定义脚本，返回空数组
+	router.GET("/emby/CustomCssJS/Scripts", auth, emptyArrayHandler())
 }
 
 func emptyJSONHandler() gin.HandlerFunc {
