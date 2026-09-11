@@ -1,10 +1,10 @@
 # FakEmby 继续开发方案
 
-> 版本：v1.2（M0 已执行） ｜ 编制日期：2026-09-11 ｜ 最近更新：2026-09-12
-> 适用对象：本仓库当前代码基线（master，29 个提交，tag `v0.9.0-pre`）
+> 版本：v1.2 ｜ 编制日期：2026-09-11 ｜ 最近更新：2026-09-12
+> 适用对象：本仓库当前代码基线（master，tag `v0.9.0-pre`）
 > 目标：把「能跑通的 Emby 兼容层」推进为「可公开部署、可长期维护的产品级服务」
 >
-> **进度：M0 已完成并通过验收（26/26），下一步 M1（测试与 CI）。详见 §10 执行记录。**
+> **进度：M0 已完成并通过验收（26/26）；M1 已完成（46 用例全绿，service 71% / signer 96% 覆盖）。下一步 M2。详见 §10 执行记录。**
 
 ---
 
@@ -375,6 +375,34 @@ FAKEMBY_SERVER_PORT=9999 ./fakemby &   # 期望监听 9999
 3. `DirectStreamUrl` 不再带 `api_key`，外部播放器依赖签名参数 `exp`/`sig`（无签名时也无 token，只能靠客户端自带 token 访问）。
 4. CORS 默认同源，浏览器跨域需显式配置 `server.cors_origins`。
 5. 跨用户读取返回 403。
+
+### M1 · 已完成（2026-09-12）
+
+测试与 CI 基线已建立。`go build ./...`、`go vet ./...`、`gofmt -l`、`go test -count=1 ./...` 全绿，
+**46 个顶层用例 / 159 个（含子测试）全部通过**；覆盖率：`service 71.0%`、`infra/signer 96.2%`、`emby 48.6%`。
+
+| ID | 状态 | 落地要点 |
+|----|------|----------|
+| M1-1 | ✅ | 新增 `internal/testutil/`：`NewTestDB`（隔离内存 SQLite + 迁移 + 建索引 + 注入全局句柄）、`SeedFixtures`（3 用户 / 2 库 / 电影 / Series→Season→Episode / 播放源 / 图片 / 字幕 / 进度 / 含过期 token）、`TestConfig`、`NewRouter`、`NewTestServer`。为此给生产代码加了两个注入点：`database.Set`/`database.Migrate` 与 `config.SetGlobal`（均标注仅测试用） |
+| M1-2 | ✅ | service 层单测：`media`（过滤/排序/分页/类型/搜索/继承/计数）、`image`（tag 生成、redirect 与 proxy_cache、父级继承）、`auth`（bcrypt/token/过期/短 token）、`playback`（已看/收藏/续看/进度）。覆盖率 71.0%（目标 ≥60%） |
+| M1-3 | ✅ | `internal/emby/contract_test.go`：17 个核心端点契约（系统信息、登录、Views/Items/详情/Latest、季与集、已看、收藏、Resume、PlaybackInfo、302 起播、搜索、管理接口）。`security_test.go`：**S1/S3/S5/S6/S7 各一条反向用例 + CORS 三条 + Public 列表脱敏**，共 12 条 |
+| M1-4 | ✅ | `internal/types/dto_test.go`：电影/剧集/季三种 DTO 存 golden（`internal/types/testdata/*.golden.json`），`-update` 可重写；另有一条自证用例防止 golden 静默失效 |
+| M1-5 | ✅ | `.github/workflows/ci.yml`：push/PR 触发 `gofmt -l` / `go build` / `go vet` / `go test -race`；Go 版本取自 `go.mod`，带依赖缓存与并发取消 |
+| M1-6 | ✅ | `.golangci.yml`（v2 schema）：启用 `errcheck` / `govet` / `ineffassign` / `staticcheck` / `unused` + `gofmt` 格式化器，排除测试与 dev 脚本。CI 中由 `golangci-lint-action` 执行 |
+| M1-7 | ✅ | `tests/integration/smoke_test.go`：10 步端到端（系统信息 → 登录 → 导入 → 浏览 → 检索 → 详情 → 起播 → 进度 → 续看 → 已看），每步有断言；默认进程内跑，设 `FAKEMBY_SMOKE_BASE_URL` 可对活体服务跑同一套。`scripts/test/integration_test.sh` 改为调用该套件 |
+
+**M1 顺手修掉的真实 bug**（都是写测试时才暴露出来的）：
+
+1. **取消已看 / 取消收藏静默失效**：`UnmarkAsPlayed`/`UnmarkAsFavorite` 用 `db.Where(...).Update(...)` 而不指定 `Model`，gorm 拼出的 UPDATE 没有表名必然报错，旧代码又把 `RowsAffected == 0` 当成功吞掉 → 用户点了没反应、服务端返回 200。已抽成 `toggleFlag` 并正确返回错误。
+2. **短 token 导致 panic**：`VerifyToken` 里 `token[:16]` 对短于 16 字符的 token 越界（客户端可传任意串）。改为 `tokenPrefix()` 安全截取。
+3. **剧集背景图 404**：`enrichInheritedImages` 向上两级（Episode→Season→Series）继承图片时只填了 tag、没填 `ParentBackdropItemId`，客户端拿不到图。
+4. **直链缺 `/emby` 前缀**：`DirectStreamUrl` 生成的是 `/Videos/{id}/stream`，而路由挂在 `/emby/Videos/...` 下 → 客户端按直链起播必然 404。已补前缀。
+5. `gofmt -l` 此前不干净（dto.go / media.go / models.go 等），已统一格式化，否则 CI 会红。
+
+**环境说明**：
+
+- 本机（Windows）没有 gcc，`go test -race` 无法运行（`CGO_ENABLED=1` 也缺 C 编译器），CI 的 Linux runner 上正常。本地验证请用 `go test ./...`。
+- `golangci-lint` 二进制在本机未能装上（模块缓存被安全软件拦截 rename），因此本地只跑了 `errcheck` 等价检查；lint 的实际执行交给 CI。
 
 ---
 

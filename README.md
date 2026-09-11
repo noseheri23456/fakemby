@@ -70,7 +70,34 @@ python3 scripts/test/import_test_data.py
 | [配置指南](docs/CONFIGURATION.md) | YAML 配置项、环境变量、数据库表结构 |
 | [部署指南](docs/DEPLOYMENT.md) | Docker、裸机、Kubernetes 部署方式 |
 | [开发指南](docs/DEVELOPMENT.md) | 构建、测试、添加新端点的流程 |
-| [继续开发方案](docs/ROADMAP.md) | 现状审计、风险清单、M0–M4 实施路线（M0 已完成） |
+| [继续开发方案](docs/ROADMAP.md) | 现状审计、风险清单、M0–M4 实施路线（M0、M1 已完成） |
+
+## 测试
+
+M1 已建立测试与 CI 基线，常用命令：
+
+```bash
+go test ./...                     # 全量测试（含契约测试与安全回归）
+go test -race ./...               # 带竞态检测（CI 用；Windows 需先装 gcc）
+go test ./internal/service/... -cover        # service 层覆盖率（当前 71%）
+go test ./tests/integration/... -v           # 端到端冒烟（10 步，进程内起服务）
+go test ./internal/types/... -update         # 重写 DTO golden 文件
+golangci-lint run                            # 静态检查（配置见 .golangci.yml）
+```
+
+对活体服务跑同一套冒烟：
+
+```bash
+FAKEMBY_SMOKE_BASE_URL=http://host:8096 FAKEMBY_ADMIN_API_KEY=<key> \
+  go test ./tests/integration/... -run TestSmoke -v
+```
+
+测试脚手架在 `internal/testutil/`：三行代码即可拿到「内存库 + 种子数据 + 挂好全部路由的 gin 引擎」。
+
+```go
+env := testutil.Setup(t)                    // 内存 SQLite + 种子数据 + 测试配置
+ts := testutil.NewTestServer(t, env.Cfg)    // 真实 HTTP 服务
+```
 
 ## 项目结构
 
