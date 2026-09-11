@@ -383,3 +383,56 @@ func TestAdminUserRoutes(t *testing.T) {
 	stats := a.do(http.MethodGet, "/api/admin/stats", key, nil)
 	assert.Equal(t, http.StatusOK, stats.Status)
 }
+
+// Latest Media 只能返回真实媒体条目。Genre/Person/Studio 等伪条目
+// 混入会让官方客户端主页「最新媒体」板块渲染异常（转圈/白屏）。
+func TestLatestMediaExcludesNonMediaTypes(t *testing.T) {
+	a, env := newAPI(t)
+
+	// 模拟脏数据：插入 Genre/Person/Studio 伪条目（导入 API 未校验类型时可能写入）
+	require.NoError(t, env.DB.Create(&database.MediaItem{
+		ID: "genre-dirty-1", LibraryID: testutil.MovieLibID, Type: "Genre", Name: "Drama",
+	}).Error)
+	require.NoError(t, env.DB.Create(&database.MediaItem{
+		ID: "person-dirty-1", LibraryID: testutil.MovieLibID, Type: "Person", Name: "Someone",
+	}).Error)
+
+	r := a.get("/emby/Users/"+testutil.NormalUserID+"/Items/Latest", testutil.NormalToken)
+	require.Equal(t, http.StatusOK, r.Status)
+
+	// Latest 返回裸数组（官方语义），逐条断言类型
+	var items []map[string]any
+	require.NoError(t, json.Unmarshal(r.Body, &items), "响应不是合法 JSON 数组: %s", string(r.Body))
+	require.NotEmpty(t, items, "种子里有 Movie/Series/Episode，Latest 不应为空")
+	for _, it := range items {
+		assert.Contains(t, []string{"Movie", "Series", "Episode"}, it["Type"],
+			"Latest Media 不应返回非媒体条目，Got Type=%v", it["Type"])
+	}
+
+	// IncludeItemTypes 参数可覆盖默认类型集
+	r2 := a.get("/emby/Users/"+testutil.NormalUserID+"/Items/Latest?IncludeItemTypes=Movie",
+		testutil.NormalToken)
+	require.Equal(t, http.StatusOK, r2.Status)
+	var movies []map[string]any
+	require.NoError(t, json.Unmarshal(r2.Body, &movies))
+	for _, it := range movies {
+		assert.Equal(t, "Movie", it["Type"])
+	}
+}
+
+// 官方客户端启动序列会拉系统配置与 Ping；缺失会导致部分客户端初始化异常。
+func TestSystemConfigurationAndPing(t *testing.T) {
+	a, _ := newAPI(t)
+
+	// 未认证访问系统配置必须 401
+	assert.Equal(t, http.StatusUnauthorized, a.get("/emby/System/Configuration", "").Status)
+
+	r := a.get("/emby/System/Configuration", testutil.NormalToken)
+	require.Equal(t, http.StatusOK, r.Status)
+	body := r.JSON(t)
+	assert.Equal(t, true, body["StartupWizardCompleted"])
+
+	// Ping 公开可达
+	assert.Equal(t, http.StatusOK, a.get("/emby/System/Ping", "").Status)
+	assert.Equal(t, http.StatusOK, a.get("/emby/system/ping", "").Status)
+}

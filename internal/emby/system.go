@@ -43,6 +43,46 @@ func RegisterSystemRoutes(router *gin.Engine, cfg *config.Config) {
 
 	// WOL 端点
 	router.GET("/emby/System/WakeOnLanInfo", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), getWakeOnLanInfo())
+
+	// 官方客户端启动序列端点：登录后会拉系统配置与 Ping。
+	// 缺失（404）会导致部分官方客户端（Android/iOS/TV）初始化异常、主页转圈。
+	sysCfgHandler := getSystemConfiguration(cfg)
+	router.GET("/emby/System/Configuration", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), sysCfgHandler)
+	router.GET("/emby/system/configuration", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), sysCfgHandler)
+	pingHandler := systemPing()
+	router.GET("/emby/System/Ping", pingHandler)
+	router.GET("/emby/system/ping", pingHandler)
+	router.GET("/emby/System/Ping/info", pingHandler)
+}
+
+// SystemConfiguration 是官方客户端启动时拉取的系统配置骨架。
+// 只返回客户端初始化强依赖的键，其余键让客户端走默认值。
+type SystemConfiguration struct {
+	Language               string `json:"Language"`
+	PreferredMetadataLangs string `json:"PreferredMetadataLanguage"`
+	MetadataCountry        string `json:"MetadataCountryCode"`
+	StartupWizardCompleted bool   `json:"StartupWizardCompleted"`
+	EnableUPnP             bool   `json:"EnableUPnP"`
+	LoggingLevel           string `json:"LoggingLevel"`
+}
+
+func getSystemConfiguration(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.JSON(http.StatusOK, SystemConfiguration{
+			Language:               "zh-CN",
+			PreferredMetadataLangs: "zh-CN",
+			MetadataCountry:        "CN",
+			StartupWizardCompleted: true,
+			EnableUPnP:             false,
+			LoggingLevel:           "Info",
+		})
+	}
+}
+
+func systemPing() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.String(http.StatusOK, "FakEmby Server")
+	}
 }
 
 func getSystemInfoPublic(cfg *config.Config) gin.HandlerFunc {

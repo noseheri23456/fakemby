@@ -91,9 +91,13 @@ func main() {
 	emby.RegisterImageRoutes(router, cfg)
 	emby.RegisterSearchRoutes(router, cfg)
 	emby.RegisterStatsRoutes(router, cfg)
+	emby.RegisterCompatRoutes(router, cfg)
 
 	// WebSocket 端点 - 客户端连接保活（原生实现）
 	router.GET("/embywebsocket", handleWebSocket)
+	// Emby Theater / 官方客户端连接的路径变体（实测 Theater 3.0.20 会两个都试）
+	router.GET("/embysocket", handleWebSocket)
+	router.GET("/emby/embysocket", handleWebSocket)
 
 	// 创建带大小写不敏感路由包装的 HTTP Handler
 	handler := emby.CaseInsensitiveHandler(router)
@@ -139,7 +143,11 @@ func main() {
 	}
 }
 
-// handleWebSocket 原生 WebSocket 握手实现
+// handleWebSocket 原生 WebSocket 握手实现（客户端连接保活）
+//
+// 时序要点：必须先 Hijack 再手写 101 响应。gin 的 WriteHeader 是延迟写，
+// 若先 WriteHeader(101) 再 Hijack，101 永远不会被刷到底层 socket，
+// 客户端会无限等待握手响应（实测 Emby Theater/ curl 均挂死）。
 func handleWebSocket(c *gin.Context) {
 	if !strings.Contains(strings.ToLower(c.GetHeader("Upgrade")), "websocket") {
 		c.Status(http.StatusBadRequest)
@@ -156,17 +164,23 @@ func handleWebSocket(c *gin.Context) {
 	hash := sha1.Sum([]byte(key + magic))
 	accept := base64.StdEncoding.EncodeToString(hash[:])
 
-	c.Writer.Header().Set("Upgrade", "websocket")
-	c.Writer.Header().Set("Connection", "Upgrade")
-	c.Writer.Header().Set("Sec-WebSocket-Accept", accept)
-	c.Writer.WriteHeader(http.StatusSwitchingProtocols)
-
 	hj, ok := c.Writer.(http.Hijacker)
 	if !ok {
+		c.Status(http.StatusInternalServerError)
 		return
 	}
 	conn, buf, err := hj.Hijack()
 	if err != nil {
+		c.Status(http.StatusInternalServerError)
+		return
+	}
+
+	resp := "HTTP/1.1 101 Switching Protocols\r\n" +
+		"Upgrade: websocket\r\n" +
+		"Connection: Upgrade\r\n" +
+		"Sec-WebSocket-Accept: " + accept + "\r\n\r\n"
+	if _, err := conn.Write([]byte(resp)); err != nil {
+		_ = conn.Close()
 		return
 	}
 

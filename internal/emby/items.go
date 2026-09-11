@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/fakemby/fakemby/internal/config"
@@ -364,13 +365,21 @@ func getLatest(mediaSvc *service.MediaService) gin.HandlerFunc {
 			limit = 500
 		}
 
+		// Latest Media（最新媒体）只能返回真实媒体条目。
+		// 官方客户端主页直接按条目类型渲染卡片，Genre/Person/Studio 等
+		// 非媒体条目混入会导致渲染异常（主页转圈/白屏）。
+		itemTypes := []string{"Movie", "Series", "Episode"}
+		if inc := c.Query("IncludeItemTypes"); inc != "" {
+			itemTypes = strings.Split(inc, ",")
+		}
+
 		// 获取最新添加的媒体
 		var parentIDPtr *string
 		if parentID != "" {
 			parentIDPtr = &parentID
 		}
 
-		items, _, err := mediaSvc.GetItems(userID, parentIDPtr, false, nil, "DateCreated", "Descending", limit, 0, nil, "", "", "", "", "")
+		items, _, err := mediaSvc.GetItems(userID, parentIDPtr, false, itemTypes, "DateCreated", "Descending", limit, 0, nil, "", "", "", "", "")
 		if err != nil {
 			slog.Error("获取最新媒体失败", "error", err)
 			c.JSON(http.StatusInternalServerError, ErrInternal)

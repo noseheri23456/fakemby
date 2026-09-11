@@ -94,6 +94,7 @@ func NewRouter(t *testing.T, cfg *config.Config) *gin.Engine {
 	emby.RegisterImageRoutes(router, cfg)
 	emby.RegisterSearchRoutes(router, cfg)
 	emby.RegisterStatsRoutes(router, cfg)
+	emby.RegisterCompatRoutes(router, cfg)
 
 	return router
 }
