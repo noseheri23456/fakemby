@@ -13,7 +13,7 @@ import (
 )
 
 func main() {
-	db, err := database.Init("./fakemby.db", true)
+	db, err := database.Init("./fakemby.db", true, 10, 5)
 	if err != nil {
 		log.Fatalf("db init error: %v", err)
 	}

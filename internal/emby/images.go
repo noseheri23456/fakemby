@@ -13,7 +13,7 @@ import (
 )
 
 func RegisterImageRoutes(router *gin.Engine, cfg *config.Config) {
-	imgSvc := service.NewImageService(database.Get(), cfg.Image.Mode, cfg.Image.CacheDir)
+	imgSvc := service.NewImageService(database.Get(), cfg.Image.Mode, cfg.Image.CacheDir, cfg.Image.CacheMaxMB)
 	mediaSvc := service.NewMediaService(database.Get())
 
 	// 媒体项图片

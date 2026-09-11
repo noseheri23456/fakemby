@@ -45,24 +45,30 @@ type ServerConfig struct {
 }
 
 type DatabaseConfig struct {
-	Path    string `mapstructure:"path"`
-	WALMode bool   `mapstructure:"wal_mode"`
+	Path         string `mapstructure:"path"`
+	WALMode      bool   `mapstructure:"wal_mode"`
+	MaxOpenConns int    `mapstructure:"max_open_conns"` // 读连接池大小（A2）；<=0 回落单连接
+	MaxIdleConns int    `mapstructure:"max_idle_conns"` // 读连接池空闲连接数；>MaxOpenConns 时按后者裁剪
 }
 
 type AuthConfig struct {
-	TokenExpiryDays int `mapstructure:"token_expiry_days"`
+	TokenExpiryDays  int `mapstructure:"token_expiry_days"`
+	LoginMaxAttempts int `mapstructure:"login_max_attempts"` // 登录失败锁定阈值（A5）；<=0 禁用
+	LoginLockMinutes int `mapstructure:"login_lock_minutes"` // 锁定窗口（分钟）；A5
 }
 
 type ImageConfig struct {
-	Mode      string `mapstructure:"mode"`
-	CacheDir  string `mapstructure:"cache_dir"`
-	CDNPrefix string `mapstructure:"cdn_prefix"`
+	Mode       string `mapstructure:"mode"`
+	CacheDir   string `mapstructure:"cache_dir"`
+	CacheMaxMB int    `mapstructure:"cache_max_mb"` // 代理缓存磁盘配额（MB）；0=不限（A6）
+	CDNPrefix  string `mapstructure:"cdn_prefix"`
 }
 
 type PlaybackConfig struct {
-	Redirect bool   `mapstructure:"redirect"`
-	SignKey  string `mapstructure:"sign_key"`
-	SignTTL  int    `mapstructure:"sign_ttl"`
+	Redirect      bool   `mapstructure:"redirect"`
+	SignKey       string `mapstructure:"sign_key"`
+	SignTTL       int    `mapstructure:"sign_ttl"`
+	FlushInterval int    `mapstructure:"flush_interval"` // 进度缓冲 flush 间隔（秒）；A7
 	// SignPrefixes 只对 URL 命中这些前缀的播放源追加签名参数。
 	// 对不配合校验的第三方 CDN 追加我方签名没有意义（M0-7 的设计边界）。
 	SignPrefixes []string `mapstructure:"sign_prefixes"`
@@ -152,16 +158,22 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("database.path", "./fakemby.db")
 	v.SetDefault("database.wal_mode", true)
+	v.SetDefault("database.max_open_conns", 10)
+	v.SetDefault("database.max_idle_conns", 5)
 
 	v.SetDefault("auth.token_expiry_days", DefaultTokenExpiryDays)
+	v.SetDefault("auth.login_max_attempts", 5)
+	v.SetDefault("auth.login_lock_minutes", 15)
 
 	v.SetDefault("image.mode", "redirect")
 	v.SetDefault("image.cache_dir", "./cache/images")
+	v.SetDefault("image.cache_max_mb", 0)
 	v.SetDefault("image.cdn_prefix", "")
 
 	v.SetDefault("playback.redirect", true)
 	v.SetDefault("playback.sign_key", "")
 	v.SetDefault("playback.sign_ttl", 3600)
+	v.SetDefault("playback.flush_interval", 30)
 	v.SetDefault("playback.sign_prefixes", []string{})
 
 	v.SetDefault("admin.api_key", "")
@@ -180,10 +192,10 @@ func setDefaults(v *viper.Viper) {
 func bindEnvKeys(v *viper.Viper) {
 	keys := []string{
 		"server.host", "server.port", "server.name", "server.version", "server.id", "server.cors_origins",
-		"database.path", "database.wal_mode",
-		"auth.token_expiry_days",
-		"image.mode", "image.cache_dir", "image.cdn_prefix",
-		"playback.redirect", "playback.sign_key", "playback.sign_ttl", "playback.sign_prefixes",
+		"database.path", "database.wal_mode", "database.max_open_conns", "database.max_idle_conns",
+		"auth.token_expiry_days", "auth.login_max_attempts", "auth.login_lock_minutes",
+		"image.mode", "image.cache_dir", "image.cache_max_mb", "image.cdn_prefix",
+		"playback.redirect", "playback.sign_key", "playback.sign_ttl", "playback.flush_interval", "playback.sign_prefixes",
 		"admin.api_key",
 		"tmdb.api_key", "tmdb.language", "tmdb.image_base",
 		"log.level", "log.file",

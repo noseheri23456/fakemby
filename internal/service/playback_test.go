@@ -3,6 +3,7 @@ package service_test
 import (
 	"testing"
 
+	"github.com/fakemby/fakemby/internal/database"
 	"github.com/fakemby/fakemby/internal/service"
 	"github.com/fakemby/fakemby/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -137,4 +138,16 @@ func TestGeneratePlaySessionIsUnique(t *testing.T) {
 	b := svc.GeneratePlaySession(testutil.NormalUserID, testutil.MovieID)
 	assert.NotEmpty(t, a)
 	assert.NotEqual(t, a, b)
+}
+
+func TestMediaStreamBaseIndex(t *testing.T) {
+	// 字幕流必须接在视频/音频流之后，PlaybackInfo 与字幕流式端点共用（A10）
+	noCodecs := &database.MediaItem{}
+	assert.Equal(t, 0, service.MediaStreamBaseIndex(noCodecs), "无音视频编码时从 0 起")
+
+	videoOnly := &database.MediaItem{VideoCodec: "h264"}
+	assert.Equal(t, 1, service.MediaStreamBaseIndex(videoOnly), "有视频流时从 1 起")
+
+	videoAudio := &database.MediaItem{VideoCodec: "h264", AudioCodec: "ac3"}
+	assert.Equal(t, 2, service.MediaStreamBaseIndex(videoAudio), "视频+音频时从 2 起")
 }

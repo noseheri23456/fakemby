@@ -107,10 +107,16 @@ func (pb *ProgressBuffer) flush() {
 		return
 	}
 
+	// 先快照，避免事务失败时不小心清空缓冲（失败要保留以便重试，A7）
+	entries := make([]bufferedProgress, 0, len(pb.buffer))
+	for _, prog := range pb.buffer {
+		entries = append(entries, prog)
+	}
+
 	// 批量更新数据库
 	tx := database.Get().Begin()
 
-	for _, prog := range pb.buffer {
+	for _, prog := range entries {
 		var progress database.PlayProgress
 		if err := tx.Where("user_id = ? AND item_id = ?", prog.userID, prog.itemID).First(&progress).Error; err != nil {
 			if err == gorm.ErrRecordNotFound {
@@ -136,19 +142,59 @@ func (pb *ProgressBuffer) flush() {
 
 	if err := tx.Commit().Error; err != nil {
 		slog.Error("进度缓冲 flush 失败", "error", err)
-	} else {
-		slog.Debug("进度缓冲 flush 完成", "count", len(pb.buffer))
+		return // 保留缓冲，等待下次重试
 	}
+
+	slog.Debug("进度缓冲 flush 完成", "count", len(entries))
 
 	// 清空缓冲
 	pb.buffer = make(map[string]bufferedProgress)
 }
 
-// ShutdownProgressBuffer 关闭缓冲系统
-func ShutdownProgressBuffer() {
+// FlushProgressNow 立即把缓冲中的播放进度落库。
+// 供管理端点手动触发，以及进程优雅关闭时调用（A7：kill -9 之外的正常关闭不丢进度）。
+func FlushProgressNow() {
 	if progressBuffer != nil {
-		progressBuffer.ticker.Stop()
-		close(progressBuffer.done)
+		progressBuffer.flush()
+	}
+}
+
+// BufferProgress 把一个播放进度更新写入缓冲（去抖）。
+// 抽出为独立函数，方便 Playing / Progress 两类事件复用，也便于单测直接驱动 flush 路径。
+func BufferProgress(userID, itemID string, positionTicks int64, touch bool) {
+	if progressBuffer == nil {
+		return
+	}
+	progressBuffer.mu.Lock()
+	key := userID + ":" + itemID
+	prog := progressBuffer.buffer[key]
+	prog.userID = userID
+	prog.itemID = itemID
+	prog.positionTicks = positionTicks
+	// touch=true 时强制刷新 last_played（如「开始播放」事件）；否则只在首次出现时填，
+	// 避免进度上报风暴把 last_played 一直往后推（A7 续看排序更准）。
+	if touch || prog.lastPlayed.IsZero() {
+		prog.lastPlayed = time.Now()
+	}
+	progressBuffer.buffer[key] = prog
+	progressBuffer.mu.Unlock()
+}
+
+// ShutdownProgressBuffer 关闭缓冲系统，并在关闭前尽量把剩余数据落库。
+// flush 失败（如 DB 抖动）会保留缓冲并重试，确保正常关闭路径不丢进度（A7）。
+func ShutdownProgressBuffer() {
+	if progressBuffer == nil {
+		return
+	}
+	progressBuffer.ticker.Stop()
+	close(progressBuffer.done)
+
+	for attempt := 0; attempt < 3; attempt++ {
+		progressBuffer.flush()
+		if len(progressBuffer.buffer) == 0 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
@@ -243,17 +289,7 @@ func playingStart() gin.HandlerFunc {
 		)
 
 		// 添加到缓冲（更新 last_played）
-		if progressBuffer != nil {
-			progressBuffer.mu.Lock()
-			key := userID + ":" + req.ItemId
-			prog := progressBuffer.buffer[key]
-			prog.userID = userID
-			prog.itemID = req.ItemId
-			prog.positionTicks = req.PositionTicks
-			prog.lastPlayed = time.Now()
-			progressBuffer.buffer[key] = prog
-			progressBuffer.mu.Unlock()
-		}
+		BufferProgress(userID, req.ItemId, req.PositionTicks, true)
 
 		// Update active sessions
 		updateActiveSession(userID, req.PlaySessionId, req.ItemId, req.PositionTicks, req.IsPaused, c.ClientIP())
@@ -272,26 +308,14 @@ func playingProgress() gin.HandlerFunc {
 			return
 		}
 
-		// 添加到缓冲（仅更新进度，不立即写入 DB）
-		if progressBuffer != nil {
-			progressBuffer.mu.Lock()
-			key := userID + ":" + req.ItemId
-			prog := progressBuffer.buffer[key]
-			prog.userID = userID
-			prog.itemID = req.ItemId
-			prog.positionTicks = req.PositionTicks
-			if prog.lastPlayed.IsZero() {
-				prog.lastPlayed = time.Now()
-			}
-			progressBuffer.buffer[key] = prog
-			progressBuffer.mu.Unlock()
+		// 添加到缓冲（仅更新进度，不立即写入 DB；首次出现才填 last_played）
+		BufferProgress(userID, req.ItemId, req.PositionTicks, false)
 
-			slog.Debug("进度更新（缓冲）",
-				"user_id", userID,
-				"item_id", req.ItemId,
-				"position_ticks", req.PositionTicks,
-			)
-		}
+		slog.Debug("进度更新（缓冲）",
+			"user_id", userID,
+			"item_id", req.ItemId,
+			"position_ticks", req.PositionTicks,
+		)
 
 		// Update active sessions
 		updateActiveSession(userID, req.PlaySessionId, req.ItemId, req.PositionTicks, req.IsPaused, c.ClientIP())

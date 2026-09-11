@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/fakemby/fakemby/internal/database"
+	"github.com/fakemby/fakemby/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -34,6 +35,44 @@ func RegisterAdminUserRoutes(router *gin.Engine) {
 	router.GET("/api/admin/users", adminAuth(), listUsers())
 	router.DELETE("/api/admin/users/:userId", adminAuth(), deleteUser())
 	router.GET("/api/admin/stats", adminAuth(), getStats())
+	// 手动触发进度缓冲落库（A7）：无需 SIGUSR1（Windows 不支持），管理脚本/健康探针可直接调用
+	router.POST("/api/admin/progress/flush", adminAuth(), flushProgress())
+	// 改密（A4）：清掉「必须改密」标记，强制改密流程的闭环
+	router.POST("/api/admin/users/:userId/password", adminAuth(), changeUserPassword())
+}
+
+// flushProgress 立即把内存中的播放进度缓冲写入数据库。
+func flushProgress() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		FlushProgressNow()
+		c.Status(http.StatusNoContent)
+	}
+}
+
+type ChangePasswordRequest struct {
+	Password string `json:"password" binding:"required"`
+}
+
+// changeUserPassword 修改指定用户的口令，并清除「必须改密」标记（A4）。
+func changeUserPassword() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID := c.Param("userId")
+
+		var req ChangePasswordRequest
+		if err := c.BindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, ErrBadRequest)
+			return
+		}
+
+		authSvc := service.NewAuthService(database.Get())
+		if err := authSvc.ChangePassword(userID, req.Password); err != nil {
+			slog.Error("修改用户密码失败", "error", err)
+			c.JSON(http.StatusInternalServerError, ErrInternal)
+			return
+		}
+
+		c.Status(http.StatusNoContent)
+	}
 }
 
 func listUsers() gin.HandlerFunc {

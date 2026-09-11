@@ -9,6 +9,7 @@ import (
 
 	"github.com/fakemby/fakemby/internal/config"
 	"github.com/fakemby/fakemby/internal/database"
+	"github.com/fakemby/fakemby/internal/infra/ratelimit"
 	"github.com/fakemby/fakemby/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -25,6 +26,9 @@ type AuthenticateResponse struct {
 	SessionInfo SessionInfo `json:"SessionInfo"`
 	AccessToken string      `json:"AccessToken"`
 	ServerID    string      `json:"ServerId"`
+	// ForcePasswordChange 账户处于「必须改密」状态（首次启动的默认口令账户，A4）。
+	// 客户端应引导用户改密，否则该口令长期暴露。
+	ForcePasswordChange bool `json:"ForcePasswordChange"`
 }
 
 type UserDTO struct {
@@ -140,8 +144,13 @@ func GetUserPolicy(u *database.User) UserPolicy {
 	return policy
 }
 
+// loginLimiter 登录失败限流器（按 IP+用户名）。在 RegisterAuthRoutes 中按配置创建，
+// 包级变量便于 getTokenFromRequest 的 Basic Auth 分支复用同一把锁（A5）。
+var loginLimiter *ratelimit.Limiter
+
 func RegisterAuthRoutes(router *gin.Engine, cfg *config.Config) {
 	authSvc := service.NewAuthService(database.Get())
+	loginLimiter = ratelimit.New(cfg.Auth.LoginMaxAttempts, cfg.Auth.LoginLockMinutes)
 
 	// 认证端点（PascalCase）
 	router.POST("/emby/Users/AuthenticateByName", authenticateByName(authSvc, cfg))
@@ -197,12 +206,31 @@ func authenticateByName(authSvc *service.AuthService, cfg *config.Config) gin.Ha
 			pw = req.Password
 		}
 
+		// 登录失败限流：按 IP+用户名，窗口内失败达到阈值即锁定（A5）
+		limitKey := c.ClientIP() + ":" + req.Username
+		if loginLimiter != nil && loginLimiter.IsLocked(limitKey) {
+			slog.Warn("🔐 登录被限流锁定", "key", limitKey)
+			c.JSON(http.StatusTooManyRequests, gin.H{
+				"StatusCode": http.StatusTooManyRequests,
+				"Message":    "Too many failed login attempts, please try again later",
+			})
+			return
+		}
+
 		// 验证用户
 		user, err := authSvc.VerifyPassword(req.Username, pw)
 		if err != nil {
+			if loginLimiter != nil {
+				loginLimiter.RecordFailure(limitKey)
+			}
 			slog.Warn("🔐 验证失败", "username", req.Username, "error", err)
 			c.JSON(http.StatusUnauthorized, ErrInvalidCredentials)
 			return
+		}
+
+		// 登录成功：清除失败计数，避免正常用户被误锁（A5）
+		if loginLimiter != nil {
+			loginLimiter.Reset(limitKey)
 		}
 
 		// 解析请求头中的设备信息
@@ -257,6 +285,8 @@ func authenticateByName(authSvc *service.AuthService, cfg *config.Config) gin.Ha
 			},
 			AccessToken: token,
 			ServerID:    cfg.Server.ID,
+			// 默认口令账户首次启动标记 MustChangePassword → 强制改密（A4）
+			ForcePasswordChange: user.MustChangePassword,
 		}
 
 		c.JSON(http.StatusOK, resp)
@@ -490,8 +520,15 @@ func getTokenFromRequest(c *gin.Context) string {
 					return ""
 				}
 
-				// 生成 Token
-				token, err := authSvc.GenerateToken(user.ID, "", "BasicAuth", "RodelPlayer", "1.0")
+				// 不再每请求铸造新 token（A5）：优先复用该用户已有的有效 BasicAuth token，
+				// 避免 tokens 表随每个请求无限增长。
+				if cfg := config.Get(); cfg != nil {
+					if existing, ferr := authSvc.FindValidToken(user.ID, "RodelPlayer", "BasicAuth", cfg.TokenExpiryDays()); ferr == nil && existing != nil {
+						slog.Debug("✅ HTTP Basic Auth 复用已有 Token", "username", username)
+						return existing.Token
+					}
+				}
+				token, err := authSvc.GenerateToken(user.ID, "BasicAuth", "BasicAuth", "RodelPlayer", "1.0")
 				if err != nil {
 					slog.Error("✗ HTTP Basic Auth 令牌生成失败", "error", err)
 					return ""

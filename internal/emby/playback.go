@@ -53,8 +53,8 @@ func RegisterPlaybackRoutes(router *gin.Engine, cfg *config.Config) {
 	router.GET("/emby/items/:itemId/download", auth, downloadVideo(mediaSvc))
 
 	// 字幕 (Task 4.1)
-	router.GET("/emby/Videos/:itemId/:mediaSourceId/Subtitles/:index/Stream.:format", auth, streamSubtitle())
-	router.GET("/emby/videos/:itemId/:mediaSourceId/subtitles/:index/stream.:format", auth, streamSubtitle())
+	router.GET("/emby/Videos/:itemId/:mediaSourceId/Subtitles/:index/Stream.:format", auth, streamSubtitle(mediaSvc))
+	router.GET("/emby/videos/:itemId/:mediaSourceId/subtitles/:index/stream.:format", auth, streamSubtitle(mediaSvc))
 
 	// 反代回调：校验我方签发的直链（OpenList / 自建反代用）
 	router.GET("/api/auth/verify", verifySignedURL(sgn))
@@ -209,12 +209,15 @@ func getPlaybackInfo(mediaSvc *service.MediaService, playbackSvc *service.Playba
 			}
 
 			// 添加字幕流 (Task 3.4)
+			// 字幕流 Index 必须接在视频/音频流之后（见 service.MediaStreamBaseIndex），
+			// 且 /Subtitles/:index/Stream 端点用同一套计算反查，二者才能对上（A10）。
 			var subtitles []database.Subtitle
-			if err := database.Get().Where("item_id = ?", itemID).Find(&subtitles).Error; err == nil {
+			if err := database.Get().Where("item_id = ?", itemID).Order("id ASC").Find(&subtitles).Error; err == nil {
+				base := service.MediaStreamBaseIndex(item)
 				for i, sub := range subtitles {
 					subStream := types.MediaStreamDto{
 						Type:                   "Subtitle",
-						Index:                  len(mediaStreams),
+						Index:                  base + i,
 						Codec:                  sub.Codec,
 						Language:               sub.Language,
 						Title:                  sub.Title,
@@ -362,20 +365,27 @@ func downloadVideo(mediaSvc *service.MediaService) gin.HandlerFunc {
 	}
 }
 
-func streamSubtitle() gin.HandlerFunc {
+func streamSubtitle(mediaSvc *service.MediaService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		itemID := c.Param("itemId")
 		indexStr := c.Param("index")
 
 		var subtitles []database.Subtitle
-		if err := database.Get().Where("item_id = ?", itemID).Find(&subtitles).Error; err != nil {
+		if err := database.Get().Where("item_id = ?", itemID).Order("id ASC").Find(&subtitles).Error; err != nil {
 			c.JSON(http.StatusNotFound, ErrNotFound)
 			return
 		}
 
-		// 处理字幕索引匹配
+		// 字幕流 Index 与 PlaybackInfo 共用同一套计算（service.MediaStreamBaseIndex）：
+		// 视频流(0) + 音频流(1) 之后，第 i 条字幕的全局 Index 为 base+i。
+		// 之前这里拿 subtitles 表的下标 i 直接比 indexStr，与客户端拿到的全局 Index 错位（A10）。
+		base := 0
+		if item, err := mediaSvc.GetItemByID(itemID); err == nil {
+			base = service.MediaStreamBaseIndex(item)
+		}
+
 		for i, sub := range subtitles {
-			if fmt.Sprintf("%d", i) == indexStr {
+			if fmt.Sprintf("%d", base+i) == indexStr {
 				c.Redirect(http.StatusFound, sub.URL)
 				return
 			}

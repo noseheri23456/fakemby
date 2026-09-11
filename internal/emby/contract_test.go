@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/fakemby/fakemby/internal/database"
 	"github.com/fakemby/fakemby/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -216,6 +217,41 @@ func TestPlaybackInfoNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, r.Status)
 }
 
+func TestSubtitleIndexAlignsWithPlaybackInfo(t *testing.T) {
+	a, _ := newAPI(t)
+
+	info := a.post("/emby/Items/"+testutil.EpisodeID+"/PlaybackInfo", testutil.NormalToken, []byte(`{}`))
+	require.Equal(t, http.StatusOK, info.Status)
+
+	sources := info.Array(t, "MediaSources")
+	require.Len(t, sources, 1)
+	streams, ok := sources[0].(map[string]any)["MediaStreams"].([]any)
+	require.True(t, ok, "MediaSources[0] 必须带 MediaStreams")
+
+	// 剧集有视频(h264)+音频(aac) → base=2；种子数据里一条字幕 → 其 Index 应为 2
+	var subIndex float64
+	found := false
+	for _, s := range streams {
+		st := s.(map[string]any)
+		if st["Type"] == "Subtitle" {
+			subIndex = st["Index"].(float64)
+			assert.Equal(t, "srt", st["Codec"])
+			found = true
+		}
+	}
+	require.True(t, found, "PlaybackInfo 应渲染字幕流")
+	assert.Equal(t, float64(2), subIndex, "字幕 Index 必须接在视频/音频流之后（A10）")
+
+	// 用该全局 Index 请求字幕流 → 302 到字幕源站
+	stream := a.get("/emby/Videos/"+testutil.EpisodeID+"/"+testutil.EpisodeSrcID+"/Subtitles/2/Stream.srt", testutil.NormalToken)
+	require.Equal(t, http.StatusFound, stream.Status)
+	assert.Equal(t, "https://sub.example.com/ep1.srt", stream.Header.Get("Location"))
+
+	// 用旧的「字幕表下标」逻辑（index=0）请求 → 必须 404，证明二者已对齐
+	bad := a.get("/emby/Videos/"+testutil.EpisodeID+"/"+testutil.EpisodeSrcID+"/Subtitles/0/Stream.srt", testutil.NormalToken)
+	assert.Equal(t, http.StatusNotFound, bad.Status)
+}
+
 func TestSearchHints(t *testing.T) {
 	a, _ := newAPI(t)
 
@@ -236,6 +272,53 @@ func TestAdminImportRequiresKey(t *testing.T) {
 		map[string]string{"X-Api-Key": testutil.TestAdminAPIKey}, payload)
 	require.Equal(t, http.StatusOK, withKey.Status)
 	assert.InDelta(t, 1, withKey.JSON(t)["imported"], 0)
+}
+
+func TestLoginForcePasswordChange(t *testing.T) {
+	a, env := newAPI(t)
+
+	// 插入一个「必须改密」的账户（首次启动的默认口令账户会带此标记，A4）
+	hash, err := database.HashPassword("old-pass")
+	require.NoError(t, err)
+	require.NoError(t, env.DB.Create(&database.User{
+		ID: "user-force", Name: "forceuser", PasswordHash: hash,
+		IsAdmin: false, Policy: "{}", MustChangePassword: true,
+	}).Error)
+
+	r := a.post("/emby/Users/AuthenticateByName", "",
+		[]byte(`{"Username":"forceuser","Pw":"old-pass"}`))
+	require.Equal(t, http.StatusOK, r.Status)
+	assert.Equal(t, true, r.JSON(t)["ForcePasswordChange"], "应提示客户端强制改密")
+
+	// 改密后标记清除，再次登录不再强制
+	cp := a.do(http.MethodPost, "/api/admin/users/user-force/password",
+		map[string]string{"X-Api-Key": testutil.TestAdminAPIKey},
+		[]byte(`{"password":"new-strong-pass"}`))
+	require.Equal(t, http.StatusNoContent, cp.Status)
+
+	again := a.post("/emby/Users/AuthenticateByName", "",
+		[]byte(`{"Username":"forceuser","Pw":"new-strong-pass"}`))
+	require.Equal(t, http.StatusOK, again.Status)
+	assert.Equal(t, false, again.JSON(t)["ForcePasswordChange"])
+}
+
+func TestLoginRateLimit(t *testing.T) {
+	a, _ := newAPI(t) // 每个测试的限流器独立（maxAttempts=5）
+
+	// 连续 5 次错误密码 → 第 6 次被锁定（429，A5）
+	for i := 0; i < 5; i++ {
+		r := a.post("/emby/Users/AuthenticateByName", "",
+			[]byte(`{"Username":"alice","Pw":"wrong"}`))
+		assert.Equal(t, http.StatusUnauthorized, r.Status, "前 5 次仍是 401")
+	}
+	locked := a.post("/emby/Users/AuthenticateByName", "",
+		[]byte(`{"Username":"alice","Pw":"wrong"}`))
+	assert.Equal(t, http.StatusTooManyRequests, locked.Status, "超过失败阈值应被锁定")
+
+	// 锁定窗口内即使密码正确也应拒绝
+	correct := a.post("/emby/Users/AuthenticateByName", "",
+		[]byte(`{"Username":"alice","Pw":"test-password"}`))
+	assert.Equal(t, http.StatusTooManyRequests, correct.Status, "锁定窗口内正确密码也拒")
 }
 
 func TestAdminUserRoutes(t *testing.T) {

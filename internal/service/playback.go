@@ -23,6 +23,23 @@ func (s *PlaybackService) GetMediaSources(itemID string) ([]database.MediaSource
 	return sources, nil
 }
 
+// MediaStreamBaseIndex 返回字幕流在 MediaStreams 数组中的起始全局下标。
+//
+// 视频流（若有，Index 0）与音频流（若有）占据前若干位，字幕流必须接在它们之后。
+// PlaybackInfo 渲染字幕流下标 与 字幕流式端点按 Index 反查，必须共用同一套计算，
+// 否则客户端拿到的字幕 Index 与 /Subtitles/:index/Stream 对不上（A10：多字幕/多音轨
+// 场景下取到错误语言甚至 404）。
+func MediaStreamBaseIndex(item *database.MediaItem) int {
+	base := 0
+	if item.VideoCodec != "" {
+		base++
+	}
+	if item.AudioCodec != "" {
+		base++
+	}
+	return base
+}
+
 // GeneratePlaySession 生成播放会话 ID
 func (s *PlaybackService) GeneratePlaySession(userID, itemID string) string {
 	// 简单实现：使用 UUID

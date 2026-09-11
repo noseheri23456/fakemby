@@ -45,8 +45,8 @@ func main() {
 
 	cfg.PrintConfig()
 
-	// 初始化数据库
-	_, err = database.Init(cfg.Database.Path, cfg.Database.WALMode)
+	// 初始化数据库（读连接池大小可配，写连接池固定单连接，A2）
+	_, err = database.Init(cfg.Database.Path, cfg.Database.WALMode, cfg.Database.MaxOpenConns, cfg.Database.MaxIdleConns)
 	if err != nil {
 		logger.Error("数据库初始化失败", "error", err)
 		os.Exit(1)
@@ -60,8 +60,12 @@ func main() {
 	// 启动 Token 过期清理
 	database.StartTokenCleanupRoutine(cfg.Auth.TokenExpiryDays)
 
-	// 启动播放进度缓冲系统（30 秒 flush）
-	emby.InitProgressBuffer(database.Get(), 30*time.Second)
+	// 启动播放进度缓冲系统（flush 间隔可配，默认 30s，A7）
+	flushInterval := time.Duration(cfg.Playback.FlushInterval) * time.Second
+	if flushInterval <= 0 {
+		flushInterval = 30 * time.Second
+	}
+	emby.InitProgressBuffer(database.Get(), flushInterval)
 
 	// 创建 Gin 引擎
 	gin.SetMode(gin.ReleaseMode)

@@ -40,7 +40,7 @@ func TestConfig(t *testing.T) *config.Config {
 			Path:    ":memory:",
 			WALMode: false,
 		},
-		Auth: config.AuthConfig{TokenExpiryDays: 30},
+		Auth: config.AuthConfig{TokenExpiryDays: 30, LoginMaxAttempts: 5, LoginLockMinutes: 15},
 		Image: config.ImageConfig{
 			Mode:     "redirect",
 			CacheDir: t.TempDir(),

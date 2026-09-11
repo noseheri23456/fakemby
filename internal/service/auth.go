@@ -85,6 +85,37 @@ func (s *AuthService) RevokeToken(token string) error {
 	return s.db.Where("token = ?", token).Delete(&database.Token{}).Error
 }
 
+// FindValidToken 查找该用户已有的、仍在有效期内的 token（按 client/deviceName 定位）。
+// 用于 Basic Auth 等「每次请求都带凭据」的场景：复用已有 token 而不是每请求铸造新 token，
+// 避免 tokens 表无限增长（A5）。
+func (s *AuthService) FindValidToken(userID, client, deviceName string, expiryDays int) (*database.Token, error) {
+	cutoff := time.Now().AddDate(0, 0, -expiryDays)
+	var t database.Token
+	if err := s.db.Where("user_id = ? AND client = ? AND device_name = ? AND created_at >= ?",
+		userID, client, deviceName, cutoff).
+		Order("created_at desc").First(&t).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &t, nil
+}
+
+// ChangePassword 修改用户口令，并清除「必须改密」标记（A4）。
+func (s *AuthService) ChangePassword(userID, newPassword string) error {
+	hash, err := database.HashPassword(newPassword)
+	if err != nil {
+		return err
+	}
+	return s.db.Model(&database.User{}).
+		Where("id = ?", userID).
+		Updates(map[string]interface{}{
+			"password_hash":        hash,
+			"must_change_password": false,
+		}).Error
+}
+
 // GetUserByID 根据 ID 获取用户
 func (s *AuthService) GetUserByID(userID string) (*database.User, error) {
 	var user database.User

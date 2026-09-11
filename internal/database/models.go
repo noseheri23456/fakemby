@@ -91,9 +91,12 @@ type User struct {
 	PasswordHash      string
 	IsAdmin           bool
 	AllowRemoteAccess bool
-	Policy            string `gorm:"type:text"` // JSON
-	ImageURL          string
-	DateCreated       time.Time `gorm:"autoCreateTime:milli"`
+	// MustChangePassword 首次启动用默认口令（admin/admin）创建的管理员标记为 true，
+	// 登录时强制要求改密（A4）。普通账户为 false。
+	MustChangePassword bool
+	Policy             string `gorm:"type:text"` // JSON
+	ImageURL           string
+	DateCreated        time.Time `gorm:"autoCreateTime:milli"`
 }
 
 // PlayProgress 播放进度
@@ -143,13 +146,3 @@ func (User) TableName() string             { return "users" }
 func (PlayProgress) TableName() string     { return "play_progress" }
 func (Token) TableName() string            { return "tokens" }
 func (PlaybackActivity) TableName() string { return "PlaybackActivity" }
-
-// GetUsableToken 返回有效的 Token（不包括过期的）
-func (t *Token) GetUsableToken(expiryDays int) bool {
-	if t.CreatedAt.IsZero() {
-		return false
-	}
-	// 简化：假设从 CreatedAt 推算是否过期
-	// 详细实现在 service 层
-	return true
-}

@@ -12,11 +12,45 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-var db *gorm.DB
+var (
+	db      *gorm.DB // 读连接池：多连接，支持并发读
+	writeDB *gorm.DB // 写连接池：单连接，避免 database is locked（A2）
+)
 
-func Init(dbPath string, walMode bool) (*gorm.DB, error) {
+func Init(dbPath string, walMode bool, maxOpenConns, maxIdleConns int) (*gorm.DB, error) {
+	// 写句柄：单连接串行化写，配合 WAL 模式仍能并发读（A2）。
+	// 迁移 / 索引 / 默认管理员只跑一次，落在同一个库文件上即可。
+	wdb, err := openHandle(dbPath, walMode, 1, 1)
+	if err != nil {
+		return nil, fmt.Errorf("打开写数据库连接失败: %w", err)
+	}
+	if err := autoMigrate(wdb); err != nil {
+		return nil, fmt.Errorf("自动迁移失败: %w", err)
+	}
+	if err := createIndexes(wdb); err != nil {
+		return nil, fmt.Errorf("创建索引失败: %w", err)
+	}
+	if err := createDefaultAdmin(wdb); err != nil {
+		return nil, fmt.Errorf("创建默认管理员失败: %w", err)
+	}
+
+	// 读句柄：连接池大小可配，去掉「读也被 MaxOpenConns(1) 串行化」的问题（A2）。
+	rdb, err := openHandle(dbPath, walMode, maxOpenConns, maxIdleConns)
+	if err != nil {
+		return nil, fmt.Errorf("打开读数据库连接失败: %w", err)
+	}
+
+	writeDB = wdb
+	db = rdb
+	slog.Info("✓ 数据库初始化成功", "path", dbPath, "wal_mode", walMode,
+		"read_pool", maxOpenConns, "write_pool", 1)
+	return rdb, nil
+}
+
+// openHandle 打开一个独立的连接池句柄。每个 *gorm.DB 维护自己的连接池，
+// 读/写分开后，读并发不再被写连接的 MaxOpenConns(1) 卡住（A2）。
+func openHandle(dbPath string, walMode bool, maxOpen, maxIdle int) (*gorm.DB, error) {
 	// 使用 glebarez/sqlite 驱动（纯 Go，不需要 CGO）
-	// 连接字符串：file:path?mode=rwc
 	database, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
@@ -24,41 +58,30 @@ func Init(dbPath string, walMode bool) (*gorm.DB, error) {
 		return nil, fmt.Errorf("打开数据库失败: %w", err)
 	}
 
-	// SQLite 并发写入限制：设置 MaxOpenConns(1) 防止 'database is locked'
 	sqlDB, err := database.DB()
 	if err != nil {
 		return nil, fmt.Errorf("获取数据库连接失败: %w", err)
 	}
-	sqlDB.SetMaxOpenConns(1)
-	sqlDB.SetMaxIdleConns(1)
+	if maxOpen <= 0 {
+		maxOpen = 1
+	}
+	if maxIdle <= 0 || maxIdle > maxOpen {
+		maxIdle = maxOpen
+	}
+	sqlDB.SetMaxOpenConns(maxOpen)
+	sqlDB.SetMaxIdleConns(maxIdle)
 
 	// 设置 WAL 模式提高并发性能，设置 busy_timeout 处理写冲突
 	if walMode {
 		if err := database.Exec("PRAGMA journal_mode=WAL").Error; err != nil {
 			slog.Warn("设置 WAL 模式失败", "error", err)
 		}
+		// busy_timeout 是「每个连接独立」的，两个句柄都要设；写冲突时等待而非立刻报 locked
 		if err := database.Exec("PRAGMA busy_timeout=5000").Error; err != nil {
 			slog.Warn("设置 busy_timeout 失败", "error", err)
 		}
 	}
 
-	// 自动迁移
-	if err := autoMigrate(database); err != nil {
-		return nil, fmt.Errorf("自动迁移失败: %w", err)
-	}
-
-	// 创建索引
-	if err := createIndexes(database); err != nil {
-		return nil, fmt.Errorf("创建索引失败: %w", err)
-	}
-
-	// 创建默认管理员（如果不存在）
-	if err := createDefaultAdmin(database); err != nil {
-		return nil, fmt.Errorf("创建默认管理员失败: %w", err)
-	}
-
-	db = database
-	slog.Info("✓ 数据库初始化成功", "path", dbPath, "wal_mode", walMode)
 	return database, nil
 }
 
@@ -116,11 +139,12 @@ func createDefaultAdmin(d *gorm.DB) error {
 	}
 
 	adminUser := &User{
-		ID:           uuid.New().String(),
-		Name:         "admin",
-		PasswordHash: string(passwordHash),
-		IsAdmin:      true,
-		Policy:       "{}",
+		ID:                 uuid.New().String(),
+		Name:               "admin",
+		PasswordHash:       string(passwordHash),
+		IsAdmin:            true,
+		MustChangePassword: true, // 首次启动用默认口令创建，强制改密（A4）
+		Policy:             "{}",
 	}
 
 	if err := d.Create(adminUser).Error; err != nil {
@@ -145,6 +169,15 @@ func Migrate(d *gorm.DB) error {
 }
 
 func Get() *gorm.DB {
+	return db
+}
+
+// GetWrite 返回写连接池句柄。写连接为单连接，避免 SQLite 并发写报 locked（A2）。
+// 未显式初始化（仅测试用 database.Set 注入）时回退到读句柄，保持调用方语义不变。
+func GetWrite() *gorm.DB {
+	if writeDB != nil {
+		return writeDB
+	}
 	return db
 }
 
