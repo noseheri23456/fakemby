@@ -470,3 +470,34 @@ func TestProxyCacheImageServedByServer(t *testing.T) {
 		"proxy_cache 应由服务器直接出图而非 302/500，body=%s", string(body))
 	assert.Equal(t, "fake-jpeg-bytes", string(body), "应返回源站图片内容")
 }
+
+// 官方客户端（Emby Theater/Web）渲染首页 latestmedia 板块时会裸调用
+// user.Configuration.LatestItemsExcludes.includes(...)——字段缺失或为 null
+// 会抛 TypeError，炸掉 Promise.all 链，主页永久转圈。此用例锁定：
+// Users/Me 与登录响应的 Configuration 数组字段必须是 JSON 数组（可为空）。
+func TestUserConfigurationArrayFieldsNeverNull(t *testing.T) {
+	a, _ := newAPI(t)
+
+	// Users/Me
+	r := a.get("/emby/Users/Me", testutil.NormalToken)
+	require.Equal(t, http.StatusOK, r.Status)
+	body := r.JSON(t)
+	cfg, ok := body["Configuration"].(map[string]any)
+	require.True(t, ok, "Configuration 必须是对象: %s", string(r.Body))
+	for _, field := range []string{"LatestItemsExcludes", "OrderedViews", "MyMediaExcludes", "GroupedFolders"} {
+		v, ok := cfg[field].([]any)
+		require.True(t, ok, "Configuration.%s 必须是数组（不能缺失/null）: %s", field, string(r.Body))
+		assert.Empty(t, v)
+	}
+
+	// 登录响应内的 User.Configuration 同样要求
+	lr := a.post("/emby/Users/AuthenticateByName", "", []byte(`{"Username":"alice","Pw":"test-password"}`))
+	require.Equal(t, http.StatusOK, lr.Status)
+	lbody := lr.JSON(t)
+	user, ok := lbody["User"].(map[string]any)
+	require.True(t, ok, "登录响应缺少 User: %s", string(lr.Body))
+	lcfg, ok := user["Configuration"].(map[string]any)
+	require.True(t, ok)
+	_, ok = lcfg["LatestItemsExcludes"].([]any)
+	require.True(t, ok, "登录响应 User.Configuration.LatestItemsExcludes 必须是数组")
+}

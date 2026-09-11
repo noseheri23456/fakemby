@@ -72,10 +72,42 @@ type UserPolicy struct {
 	AllowCameraUpload               bool     `json:"AllowCameraUpload"`
 }
 
+// UserConfig 对齐官方 Emby 的 UserConfiguration。数组字段必须保证序列化为
+// []（而非 null）：官方客户端（Emby Theater / Emby Web）在首页渲染时会裸调用
+// Configuration.LatestItemsExcludes.includes(...) / .indexOf(...)，字段缺失
+// （undefined）会抛 TypeError，炸掉板块加载的 Promise.all 链，主页永久转圈。
 type UserConfig struct {
-	PlayDefaultAudioTrack      bool   `json:"PlayDefaultAudioTrack"`
-	SubtitleLanguagePreference string `json:"SubtitleLanguagePreference,omitempty"`
-	SubtitleMode               string `json:"SubtitleMode,omitempty"`
+	AudioLanguagePreference    string   `json:"AudioLanguagePreference"`
+	PlayDefaultAudioTrack      bool     `json:"PlayDefaultAudioTrack"`
+	SubtitleLanguagePreference string   `json:"SubtitleLanguagePreference"`
+	SubtitleMode               string   `json:"SubtitleMode"`
+	DisplayMissingEpisodes     bool     `json:"DisplayMissingEpisodes"`
+	GroupedFolders             []string `json:"GroupedFolders"`
+	LatestItemsExcludes        []string `json:"LatestItemsExcludes"`
+	MyMediaExcludes            []string `json:"MyMediaExcludes"`
+	OrderedViews               []string `json:"OrderedViews"`
+	HidePlayedInLatest         bool     `json:"HidePlayedInLatest"`
+	EnableNextEpisodeAutoPlay  bool     `json:"EnableNextEpisodeAutoPlay"`
+	RememberAudioSelections    bool     `json:"RememberAudioSelections"`
+	RememberSubtitleSelections bool     `json:"RememberSubtitleSelections"`
+	ResumeRewindSeconds        int      `json:"ResumeRewindSeconds"`
+	EnableLocalPassword        bool     `json:"EnableLocalPassword"`
+}
+
+// DefaultUserConfig 返回字段完整、数组已初始化的用户配置。
+// 所有构造 UserDTO 的地方必须用它，禁止手写 UserConfig{...} 字面量——
+// 零值的切片字段会序列化成 null，客户端裸调用 .includes() 即崩。
+func DefaultUserConfig() UserConfig {
+	return UserConfig{
+		SubtitleMode:               "Default",
+		EnableNextEpisodeAutoPlay:  true,
+		RememberAudioSelections:    true,
+		RememberSubtitleSelections: true,
+		GroupedFolders:             []string{},
+		LatestItemsExcludes:        []string{},
+		MyMediaExcludes:            []string{},
+		OrderedViews:               []string{},
+	}
 }
 
 type SessionInfo struct {
@@ -259,10 +291,7 @@ func authenticateByName(authSvc *service.AuthService, cfg *config.Config) gin.Ha
 				HasConfiguredEasyPassword: false,
 				IsAdmin:                   user.IsAdmin,
 				Policy:                    GetUserPolicy(user),
-				Configuration: UserConfig{
-					PlayDefaultAudioTrack: false,
-					SubtitleMode:          "Default",
-				},
+				Configuration:             DefaultUserConfig(),
 			},
 			SessionInfo: SessionInfo{
 				Id:                 uuid.New().String(),
@@ -330,10 +359,7 @@ func getUsersPublic() gin.HandlerFunc {
 				HasPassword:               u.PasswordHash != "",
 				HasConfiguredPassword:     u.PasswordHash != "",
 				HasConfiguredEasyPassword: false,
-				Configuration: UserConfig{
-					PlayDefaultAudioTrack: false,
-					SubtitleMode:          "Default",
-				},
+				Configuration:             DefaultUserConfig(),
 			})
 		}
 
@@ -359,10 +385,7 @@ func getCurrentUser(authSvc *service.AuthService, cfg *config.Config) gin.Handle
 			HasConfiguredEasyPassword: false,
 			IsAdmin:                   user.IsAdmin,
 			Policy:                    GetUserPolicy(user),
-			Configuration: UserConfig{
-				PlayDefaultAudioTrack: false,
-				SubtitleMode:          "Default",
-			},
+			Configuration:             DefaultUserConfig(),
 		}
 
 		c.JSON(http.StatusOK, resp)

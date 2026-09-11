@@ -236,10 +236,7 @@ func getAllUsers() gin.HandlerFunc {
 				HasConfiguredEasyPassword: false,
 				IsAdmin:                   u.IsAdmin,
 				Policy:                    GetUserPolicy(&u),
-				Configuration: UserConfig{
-					PlayDefaultAudioTrack: false,
-					SubtitleMode:          "Default",
-				},
+				Configuration:             DefaultUserConfig(),
 			})
 		}
 
@@ -274,10 +271,7 @@ func queryUsers() gin.HandlerFunc {
 				HasConfiguredEasyPassword: false,
 				IsAdmin:                   u.IsAdmin,
 				Policy:                    GetUserPolicy(&u),
-				Configuration: UserConfig{
-					PlayDefaultAudioTrack: false,
-					SubtitleMode:          "Default",
-				},
+				Configuration:             DefaultUserConfig(),
 			})
 		}
 
@@ -311,10 +305,7 @@ func getUser(authSvc *service.AuthService) gin.HandlerFunc {
 			HasConfiguredEasyPassword: false,
 			IsAdmin:                   user.IsAdmin,
 			Policy:                    GetUserPolicy(user),
-			Configuration: UserConfig{
-				PlayDefaultAudioTrack: false,
-				SubtitleMode:          "Default",
-			},
+			Configuration:             DefaultUserConfig(),
 		}
 
 		c.JSON(http.StatusOK, userDTO)
