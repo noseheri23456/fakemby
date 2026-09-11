@@ -2,6 +2,7 @@ package emby
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 
 	"github.com/fakemby/fakemby/internal/config"
@@ -43,6 +44,12 @@ func RegisterSystemRoutes(router *gin.Engine, cfg *config.Config) {
 
 	// WOL 端点
 	router.GET("/emby/System/WakeOnLanInfo", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), getWakeOnLanInfo())
+
+	// Endpoint 端点：官方客户端详情页/播放链路的 getEndpointInfo() 依赖它，
+	// 缺失（404）会让 Promise 链 reject，详情页显示 "Content no longer available"。
+	endpointHandler := getSystemEndpoint()
+	router.GET("/emby/System/Endpoint", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), endpointHandler)
+	router.GET("/emby/system/endpoint", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), endpointHandler)
 
 	// 官方客户端启动序列端点：登录后会拉系统配置与 Ping。
 	// 缺失（404）会导致部分官方客户端（Android/iOS/TV）初始化异常、主页转圈。
@@ -121,5 +128,24 @@ func getWakeOnLanInfo() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 返回空的 WOL 列表，满足客户端期望
 		c.JSON(http.StatusOK, []interface{}{})
+	}
+}
+
+// SystemEndpointInfo 官方客户端 getEndpointInfo() 的响应。
+// IsLocal: 客户端是否经回环地址访问；IsInNetwork: 是否内网访问。
+type SystemEndpointInfo struct {
+	IsInNetwork bool `json:"IsInNetwork"`
+	IsLocal     bool `json:"IsLocal"`
+}
+
+func getSystemEndpoint() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ip := net.ParseIP(c.ClientIP())
+		isLocal := ip != nil && ip.IsLoopback()
+		isInNetwork := isLocal || (ip != nil && ip.IsPrivate())
+		c.JSON(http.StatusOK, SystemEndpointInfo{
+			IsInNetwork: isInNetwork,
+			IsLocal:     isLocal,
+		})
 	}
 }

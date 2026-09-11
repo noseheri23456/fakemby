@@ -88,32 +88,35 @@ type ExternalUrl struct {
 
 // MediaSourceDto 播放源
 type MediaSourceDto struct {
-	ID                         string            `json:"Id"`
-	Name                       string            `json:"Name,omitempty"`
-	Path                       string            `json:"Path"`                // 302 重定向 URL
-	Protocol                   string            `json:"Protocol"`            // Http
-	Type                       string            `json:"Type,omitempty"`      // Default
-	Container                  string            `json:"Container,omitempty"` // mkv, mp4, etc.
-	Size                       *int64            `json:"Size,omitempty"`
-	Bitrate                    *int              `json:"Bitrate,omitempty"`
-	RunTimeTicks               *int64            `json:"RunTimeTicks,omitempty"`
-	IsRemote                   bool              `json:"IsRemote"`
-	HasMixedProtocols          bool              `json:"HasMixedProtocols"`
-	SupportsTranscoding        bool              `json:"SupportsTranscoding"`
-	SupportsDirectStream       bool              `json:"SupportsDirectStream"`
-	SupportsDirectPlay         bool              `json:"SupportsDirectPlay"`
-	IsInfiniteStream           bool              `json:"IsInfiniteStream"`
-	RequiresOpening            bool              `json:"RequiresOpening"`
-	RequiresClosing            bool              `json:"RequiresClosing"`
-	RequiresLooping            bool              `json:"RequiresLooping"`
-	SupportsProbing            bool              `json:"SupportsProbing"`
-	MediaStreams               []MediaStreamDto  `json:"MediaStreams"`
-	DefaultAudioStreamIndex    *int              `json:"DefaultAudioStreamIndex,omitempty"`
-	DefaultSubtitleStreamIndex *int              `json:"DefaultSubtitleStreamIndex,omitempty"`
-	ReadAtNativeFramerate      bool              `json:"ReadAtNativeFramerate"`
-	Formats                    []string          `json:"Formats,omitempty"`
-	RequiredHttpHeaders        map[string]string `json:"RequiredHttpHeaders,omitempty"`
-	DirectStreamUrl            string            `json:"DirectStreamUrl,omitempty"`
+	ID                         string           `json:"Id"`
+	Name                       string           `json:"Name,omitempty"`
+	Path                       string           `json:"Path"`                // 302 重定向 URL
+	Protocol                   string           `json:"Protocol"`            // Http
+	Type                       string           `json:"Type,omitempty"`      // Default
+	Container                  string           `json:"Container,omitempty"` // mkv, mp4, etc.
+	Size                       *int64           `json:"Size,omitempty"`
+	Bitrate                    *int             `json:"Bitrate,omitempty"`
+	RunTimeTicks               *int64           `json:"RunTimeTicks,omitempty"`
+	IsRemote                   bool             `json:"IsRemote"`
+	HasMixedProtocols          bool             `json:"HasMixedProtocols"`
+	SupportsTranscoding        bool             `json:"SupportsTranscoding"`
+	SupportsDirectStream       bool             `json:"SupportsDirectStream"`
+	SupportsDirectPlay         bool             `json:"SupportsDirectPlay"`
+	IsInfiniteStream           bool             `json:"IsInfiniteStream"`
+	RequiresOpening            bool             `json:"RequiresOpening"`
+	RequiresClosing            bool             `json:"RequiresClosing"`
+	RequiresLooping            bool             `json:"RequiresLooping"`
+	SupportsProbing            bool             `json:"SupportsProbing"`
+	MediaStreams               []MediaStreamDto `json:"MediaStreams"`
+	DefaultAudioStreamIndex    *int             `json:"DefaultAudioStreamIndex,omitempty"`
+	DefaultSubtitleStreamIndex *int             `json:"DefaultSubtitleStreamIndex,omitempty"`
+	ReadAtNativeFramerate      bool             `json:"ReadAtNativeFramerate"`
+	Formats                    []string         `json:"Formats,omitempty"`
+	// RequiredHttpHeaders 不带 omitempty：官方客户端 supportsDirectPlay() 裸调
+	// mediaSource.RequiredHttpHeaders.length，字段缺失（undefined）会 TypeError
+	// 炸断详情页 Promise 链。空 map 序列化为 {}，与官方服务器一致。
+	RequiredHttpHeaders map[string]string `json:"RequiredHttpHeaders"`
+	DirectStreamUrl     string            `json:"DirectStreamUrl,omitempty"`
 }
 
 // MediaStreamDto 媒体流

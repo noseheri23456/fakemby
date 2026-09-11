@@ -263,6 +263,17 @@ func TestPlaybackInfoAndStreamRedirect(t *testing.T) {
 	assert.Equal(t, testutil.MovieSrcID, src["Id"])
 	assert.NotEmpty(t, src["DirectStreamUrl"])
 
+	// 官方客户端 supportsDirectPlay() 裸调 RequiredHttpHeaders.length，
+	// 字段缺失/为 null 都会 TypeError 炸断详情页 Promise 链
+	// ("Content no longer available")。必须存在且为对象。
+	require.Contains(t, src, "RequiredHttpHeaders")
+	_, isObj := src["RequiredHttpHeaders"].(map[string]any)
+	assert.True(t, isObj, "RequiredHttpHeaders 必须是对象（{}）而非 null/缺失")
+	// MediaStreams 必须是数组（null 同样会炸客户端）
+	require.Contains(t, src, "MediaStreams")
+	_, isArr := src["MediaStreams"].([]any)
+	assert.True(t, isArr, "MediaStreams 必须是数组（[]）而非 null")
+
 	// 302 重定向到真实源站
 	stream := a.get("/emby/Videos/"+testutil.MovieID+"/stream?Static=true&mediaSourceId="+testutil.MovieSrcID, testutil.NormalToken)
 	require.Equal(t, http.StatusFound, stream.Status)
@@ -450,6 +461,15 @@ func TestLatestMediaExcludesNonMediaTypes(t *testing.T) {
 // 官方客户端启动序列会拉系统配置与 Ping；缺失会导致部分客户端初始化异常。
 func TestSystemConfigurationAndPing(t *testing.T) {
 	a, _ := newAPI(t)
+
+	// System/Endpoint：详情页 getPlaybackMediaSources -> getEndpointInfo()
+	// 依赖此端点，404 会让详情页 Promise 链 reject（"Content no longer available"）。
+	assert.Equal(t, http.StatusUnauthorized, a.get("/emby/System/Endpoint", "").Status)
+	e := a.get("/emby/System/Endpoint", testutil.NormalToken)
+	require.Equal(t, http.StatusOK, e.Status)
+	ebody := e.JSON(t)
+	assert.Contains(t, ebody, "IsInNetwork")
+	assert.Contains(t, ebody, "IsLocal")
 
 	// 未认证访问系统配置必须 401
 	assert.Equal(t, http.StatusUnauthorized, a.get("/emby/System/Configuration", "").Status)

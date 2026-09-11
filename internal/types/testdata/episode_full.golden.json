@@ -59,6 +59,7 @@
       "SupportsProbing": true,
       "MediaStreams": [],
       "ReadAtNativeFramerate": false,
+      "RequiredHttpHeaders": {},
       "DirectStreamUrl": "/emby/Videos/\u003cid\u003e/stream?Static=true\u0026mediaSourceId=\u003csrc\u003e"
     }
   ],
