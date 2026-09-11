@@ -6,7 +6,9 @@ package emby_test
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/fakemby/fakemby/internal/database"
@@ -435,4 +437,36 @@ func TestSystemConfigurationAndPing(t *testing.T) {
 	// Ping 公开可达
 	assert.Equal(t, http.StatusOK, a.get("/emby/System/Ping", "").Status)
 	assert.Equal(t, http.StatusOK, a.get("/emby/system/ping", "").Status)
+}
+
+// proxy_cache 模式下图片必须由服务器代取后直接返回（200 + 图片字节），
+// 而不是 302 到外部源。回归背景：ImageService 返回的缓存路径经 filepath.Join
+// 清洗后（相对路径丢 "./" 前缀；Windows 绝对路径以 "C:\" 开头）既不匹配 "/"
+// 也不匹配 "." 前缀，被旧逻辑误判为外部 URL 而返回 500。
+// 官方客户端（Emby Theater）主页背景轮播对 302 外部源失败会无限转圈。
+func TestProxyCacheImageServedByServer(t *testing.T) {
+	env := testutil.Setup(t)
+	env.Cfg.Image.Mode = "proxy_cache"
+	env.Cfg.Image.CacheDir = t.TempDir()
+	ts := testutil.NewTestServer(t, env.Cfg)
+
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("fake-jpeg-bytes"))
+	}))
+	t.Cleanup(origin.Close)
+
+	// 把种子 Backdrop 指向可控源站
+	require.NoError(t, env.DB.Model(&database.Image{}).
+		Where("item_id = ? AND type = ?", testutil.MovieID, "Backdrop").
+		Update("url", origin.URL+"/fanart.jpg").Error)
+
+	res, err := http.Get(ts.URL + "/emby/Items/" + testutil.MovieID + "/Images/Backdrop/0?maxWidth=1400&quality=70")
+	require.NoError(t, err)
+	defer func() { _ = res.Body.Close() }()
+	body, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+
+	require.Equal(t, http.StatusOK, res.StatusCode,
+		"proxy_cache 应由服务器直接出图而非 302/500，body=%s", string(body))
+	assert.Equal(t, "fake-jpeg-bytes", string(body), "应返回源站图片内容")
 }

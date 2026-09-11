@@ -40,12 +40,12 @@ func getItemImage(imgSvc *service.ImageService, mediaSvc *service.MediaService, 
 
 		// 根据配置决定处理方式
 		if cfg.Image.Mode == "proxy_cache" {
-			// proxy_cache 模式：返回本地文件或重定向到 CDN
-			if strings.HasPrefix(imageURL, "/") || strings.HasPrefix(imageURL, ".") {
-				// 本地路径，直接返回文件
+			// 本地路径（相对或绝对）直接返回文件。
+			// 注意 filepath.Join 会清洗掉开头的 "./"，不能按 "." 前缀判断，
+			// 必须按"非 http(s) URL"判断。
+			if isLocalFilePath(imageURL) {
 				c.File(imageURL)
 			} else {
-				// 不应该发生
 				c.JSON(http.StatusInternalServerError, ErrInternal)
 			}
 		} else {
@@ -78,7 +78,7 @@ func getItemImageByIndex(imgSvc *service.ImageService, mediaSvc *service.MediaSe
 
 		// 根据配置处理
 		if cfg.Image.Mode == "proxy_cache" {
-			if strings.HasPrefix(imageURL, "/") || strings.HasPrefix(imageURL, ".") {
+			if isLocalFilePath(imageURL) {
 				c.File(imageURL)
 			} else {
 				c.JSON(http.StatusInternalServerError, ErrInternal)
@@ -87,6 +87,14 @@ func getItemImageByIndex(imgSvc *service.ImageService, mediaSvc *service.MediaSe
 			c.Redirect(http.StatusFound, imageURL)
 		}
 	}
+}
+
+// isLocalFilePath 判断 GetImage 返回的是本地文件路径还是外部 URL。
+// proxy_cache 模式下 ImageService 返回 filepath.Join 清洗过的路径（可能是
+// "cache/images/..." 这样的相对路径，开头没有 "./"），因此只能反向判断：
+// 非 http/https URL 即视为本地文件。
+func isLocalFilePath(s string) bool {
+	return !strings.HasPrefix(s, "http://") && !strings.HasPrefix(s, "https://")
 }
 
 func getUserImage(imgSvc *service.ImageService, cfg *config.Config) gin.HandlerFunc {
