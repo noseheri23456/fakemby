@@ -1,8 +1,10 @@
 # FakEmby 继续开发方案
 
-> 版本：v1.1（复核修订版） ｜ 编制日期：2026-09-11
-> 适用对象：本仓库当前代码基线（master，26 个提交）
+> 版本：v1.2（M0 已执行） ｜ 编制日期：2026-09-11 ｜ 最近更新：2026-09-12
+> 适用对象：本仓库当前代码基线（master，29 个提交，tag `v0.9.0-pre`）
 > 目标：把「能跑通的 Emby 兼容层」推进为「可公开部署、可长期维护的产品级服务」
+>
+> **进度：M0 已完成并通过验收（26/26），下一步 M1（测试与 CI）。详见 §10 执行记录。**
 
 ---
 
@@ -337,6 +339,42 @@ FAKEMBY_SERVER_PORT=9999 ./fakemby &   # 期望监听 9999
 | M4 | 可运维 + 生态 | 10 天 | 36 天 |
 
 > 兼职投入按 2 倍计。M3/M4 内部任务可并行裁剪，按实际优先级取舍。
+
+---
+
+## 10. 执行记录
+
+### M0 · 已完成（2026-09-11/12）
+
+基线 tag：`v0.9.0-pre`。M0 全部 10 项已落地，`go build ./...`、`go vet ./...` 通过，
+`scripts/test/m0_acceptance.ps1` **26 passed / 0 failed**。
+
+| ID | 状态 | 落地要点 |
+|----|------|----------|
+| M0-1 | ✅ | `.gitignore` 补齐（`fakemby` 无扩展名二进制已从跟踪中移除、`data/`、`logs/`、`cache/`、`*.db*`、`.workbuddy/`）；tag `v0.9.0-pre` |
+| M0-2 | ✅ | `adminAuth()` 重写于 `internal/emby/authz.go`：读 `config.admin.api_key` + `subtle.ConstantTimeCompare`；五个 items 写路由已挂载 |
+| M0-3 | ✅ | `AuthTokenMiddleware` 移除 admin api_key 万能分支（`auth.go`） |
+| M0-4 | ✅ | `DirectStreamUrl` 不再拼 `api_key`；登录请求体 Info 日志与 Basic Auth base64 日志删除；`/debug/auth` 仅 `log.level=debug` 时注册 |
+| M0-5 | ✅ | 新增 `RequireUserMatch(param)` 中间件，覆盖 Views/Folders/Items/Items:Latest/Users:userId/userdata 全部读写入口 |
+| M0-6 | ✅ | `server.cors_origins`（空=同源、`*` 强制无凭据）；`/emby/Users/Public` 改用 `PublicUserDTO`（去掉 IsAdmin/Policy） |
+| M0-7 | ✅ | 新增 `internal/infra/signer`（HMAC-SHA256，`type|item|source|user|index` + exp）+ `/api/auth/verify`；`playback.sign_prefixes` 控制作用范围 |
+| M0-8 | ✅ | `SetEnvKeyReplacer` + 逐键 `BindEnv`；`CONFIG_FILE` / `-config`；配置文件缺失回落默认值并告警；`logging.Setup` 接通 level/file；`PrepareRuntime` 调 `EnsureSignKey`/`EnsureLogDir`/`EnsureCacheDir` |
+| M0-9 | ✅ | 所有 `AuthTokenMiddleware(30)` 改为 `cfg.Auth.TokenExpiryDays`（items/shows/playback/search/sessions/stats/userdata/users） |
+| M0-10 | ✅ | `config.yaml` 端口 8096；docker-compose 环境变量补 `FAKEMBY_` 前缀；Dockerfile builder 1.22→1.26（go.mod 要求 1.26.3，原先镜像根本构建不出来）；README 的 Go 版本/镜像体积/CLAUDE.md 死链已修 |
+
+**顺手修掉的问题**（不在原清单里）：
+
+- `scripts/dev/` 下两个 `main()` 同包冲突导致 `go build ./...` 失败，已加 `//go:build ignore`。
+- `RegisterUserRoutes` 原先 `cfg := config.Get()`，未加载配置时为 nil panic，改为显式传参。
+- `/emby/Users/:userId` 补归属校验（原先任意登录用户可读取他人 Policy）。
+
+**已知的行为破坏（升级必读）**：
+
+1. `/api/admin/*` 现在必须带真实 `X-Api-Key`，`change-me` 不再被接受 → 脚本改走 `FAKEMBY_ADMIN_API_KEY`。
+2. `admin.api_key` 不再能当作 `/emby/*` 的 token。
+3. `DirectStreamUrl` 不再带 `api_key`，外部播放器依赖签名参数 `exp`/`sig`（无签名时也无 token，只能靠客户端自带 token 访问）。
+4. CORS 默认同源，浏览器跨域需显式配置 `server.cors_origins`。
+5. 跨用户读取返回 403。
 
 ---
 

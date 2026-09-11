@@ -70,7 +70,7 @@ python3 scripts/test/import_test_data.py
 | [配置指南](docs/CONFIGURATION.md) | YAML 配置项、环境变量、数据库表结构 |
 | [部署指南](docs/DEPLOYMENT.md) | Docker、裸机、Kubernetes 部署方式 |
 | [开发指南](docs/DEVELOPMENT.md) | 构建、测试、添加新端点的流程 |
-| [继续开发方案](docs/ROADMAP.md) | 现状审计、风险清单、M0–M4 实施路线 |
+| [继续开发方案](docs/ROADMAP.md) | 现状审计、风险清单、M0–M4 实施路线（M0 已完成） |
 
 ## 项目结构
 
