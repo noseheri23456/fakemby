@@ -1,0 +1,46 @@
+# golangci-lint 配置（M1-6）
+#
+# 起步刻意保守：只开那些"几乎不会误报、且能立刻指出真问题"的检查项。
+# 等代码库消化完当前告警，再逐步加 gocritic / revive / errorlint 等风格类规则。
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck # 未检查的错误返回值 —— 本仓库踩过"把错误吞掉导致功能静默失效"的坑
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+  settings:
+    staticcheck:
+      # ST1000~ST1022 是命名/注释风格，先不强制
+      checks:
+        - all
+        - -ST1000
+        - -ST1003
+        - -ST1016
+        - -ST1020
+        - -ST1021
+        - -ST1022
+
+  exclusions:
+    rules:
+      # 测试里为了少写模板代码，允许忽略部分错误（例如 resp.Body.Close()）
+      - path: _test\.go
+        linters:
+          - errcheck
+      # 一次性开发脚本，不属于交付代码
+      - path: ^scripts/dev/
+        linters:
+          - errcheck
+          - unused
+
+formatters:
+  enable:
+    - gofmt
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

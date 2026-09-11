@@ -1,237 +1,31 @@
-#!/bin/bash
+#!/usr/bin/env bash
+#
+# FakEmby ¶Ëµ½¶ËÃ°ÑÌ£¨M1-7£©
+#
+# ÔçÇ°ÕâÀïÊÇ curl Æ´×Ö·û´®±È¶Ô£¬Ê§°ÜÊ±Ö»´òÓ¡Ò»¶ÑÏìÓ¦Ìå£¬ºÜÄÑÅÐ¶ÏÄÄÒ»²½¶ÏÁË¡£
+# ÏÖÔÚ¸ÄÎªµ÷ÓÃ Go Ð´µÄÃ°ÑÌÌ×¼þ tests/integration ¡ª¡ª Ã¿Ò»²½¶¼ÓÐ¶ÏÑÔÓë¿É¶ÁµÄÊ§°ÜÐÅÏ¢¡£
+#
+# ÓÃ·¨£º
+#   bash scripts/test/integration_test.sh                     # ½ø³ÌÄÚÅÜ£¨ÎÞÐèÏÈÆð·þÎñ£©
+#   FAKEMBY_SMOKE_BASE_URL=http://192.168.1.10:8096 \
+#   FAKEMBY_ADMIN_API_KEY=xxx bash scripts/test/integration_test.sh   # ¶Ô»îÌå·þÎñÅÜ
+#
+set -euo pipefail
 
-# FakEmby é›†æˆæµ‹è¯•è„šæœ¬
-# æµ‹è¯•æ‰€æœ‰ä¸»è¦åŠŸèƒ½ï¼šè®¤è¯ã€åª’ä½“æµè§ˆã€æœç´€€æ’­æ”¾ã€è¿›åº¦åŒæ­?
-set -e
-
-BASE_URL="http://localhost:8096"
-ADMIN_API_KEY="${FAKEMBY_ADMIN_API_KEY:-admin-key}"
-
-# é¢œè‰²è¾“å‡º
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+cd "$(dirname "$0")/../.."
 
 echo "========================================"
-echo "FakEmby é›†æˆæµ‹è¯•"
-echo "========================================"
-echo ""
-
-# æµ‹è¯•è®¡æ•°
-TESTS_PASSED=0
-TESTS_FAILED=0
-
-# æµ‹è¯•å‡½æ•°
-test_endpoint() {
-    local name=$1
-    local method=$2
-    local path=$3
-    local data=$4
-    local expected_code=$5
-    local headers=${6:-""}
-
-    local cmd="curl -s -X $method \"$BASE_URL$path\" -w \"\\n%{http_code}\" $headers"
-    if [ ! -z "$data" ]; then
-        cmd="$cmd -d '$data'"
-    fi
-
-    local response=$(eval $cmd)
-    local http_code=$(echo "$response" | tail -1)
-    local body=$(echo "$response" | sed '$d')
-
-    if [ "$http_code" = "$expected_code" ]; then
-        echo -e "${GREEN}âœ?{NC} $name (HTTP $http_code)"
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-        echo "$body"
-    else
-        echo -e "${RED}âœ?{NC} $name (Expected $expected_code, got $http_code)"
-        TESTS_FAILED=$((TESTS_FAILED + 1))
-        echo "Response: $body"
-    fi
-    echo ""
-}
-
-# 1. å¯åŠ¨æœåŠ¡å™?echo -e "${YELLOW}[1] å¯åŠ¨æœåŠ¡å™?..${NC}"
-if pgrep -x "fakemby.exe" > /dev/null; then
-    echo "æœåŠ¡å™¨å·²è¿è¡Œ"
-else
-    ./fakemby.exe &
-    FAKEMBY_PID=$!
-    sleep 2
-fi
-echo ""
-
-# 2. ç³»ç»Ÿä¿¡æ¯
-echo -e "${YELLOW}[2] æµ‹è¯•ç³»ç»Ÿç«¯ç‚¹...${NC}"
-test_endpoint "GET /emby/System/Info/Public" "GET" "/emby/System/Info/Public" "" "200"
-
-# 3. ç™»å½•
-echo -e "${YELLOW}[3] æµ‹è¯•è®¤è¯...${NC}"
-LOGIN_RESPONSE=$(curl -s -X POST "$BASE_URL/emby/Users/AuthenticateByName" \
-    -H "Content-Type: application/json" \
-    -d '{"Username":"admin","Pw":"admin"}')
-
-TOKEN=$(echo $LOGIN_RESPONSE | grep -o '"AccessToken":"[^"]*' | cut -d'"' -f4)
-USER_ID=$(echo $LOGIN_RESPONSE | grep -o '"Id":"[^"]*' | cut -d'"' -f4 | head -1)
-
-if [ ! -z "$TOKEN" ] && [ ! -z "$USER_ID" ]; then
-    echo -e "${GREEN}âœ?{NC} æˆåŠŸèŽ·å– Token: $TOKEN"
-    TESTS_PASSED=$((TESTS_PASSED + 1))
-else
-    echo -e "${RED}âœ?{NC} ç™»å½•å¤±è´¥"
-    TESTS_FAILED=$((TESTS_FAILED + 1))
-fi
-echo ""
-
-# 4. èŽ·å–ç”¨æˆ·ä¿¡æ¯
-echo -e "${YELLOW}[4] æµ‹è¯•ç”¨æˆ·ç«¯ç‚¹...${NC}"
-test_endpoint "GET /emby/Users/Public" "GET" "/emby/Users/Public" "" "200" \
-    "-H 'X-Emby-Token: $TOKEN'"
-
-# 5. åˆ›å»ºåª’ä½“åº?echo -e "${YELLOW}[5] æµ‹è¯•åª’ä½“åº“åˆ›å»?..${NC}"
-LIB_CREATE=$(curl -s -X POST "$BASE_URL/api/admin/items" \
-    -H "Content-Type: application/json" \
-    -H "X-Api-Key: $ADMIN_API_KEY" \
-    -d '{
-        "Name": "æµ‹è¯•ç”µå½±åº?,
-        "Type": "Folder",
-        "CollectionType": "movies"
-    }')
-
-LIB_ID=$(echo $LIB_CREATE | grep -o '"Id":"[^"]*' | cut -d'"' -f4 | head -1)
-if [ ! -z "$LIB_ID" ]; then
-    echo -e "${GREEN}âœ?{NC} åˆ›å»ºåª’ä½“åº? $LIB_ID"
-    TESTS_PASSED=$((TESTS_PASSED + 1))
-else
-    echo -e "${RED}âœ?{NC} åˆ›å»ºåª’ä½“åº“å¤±è´?
-    TESTS_FAILED=$((TESTS_FAILED + 1))
-fi
-echo ""
-
-# 6. åˆ›å»ºåª’ä½“é¡¹ç›®
-echo -e "${YELLOW}[6] æµ‹è¯•åª’ä½“é¡¹ç›®åˆ›å»º...${NC}"
-ITEM_CREATE=$(curl -s -X POST "$BASE_URL/api/admin/items" \
-    -H "Content-Type: application/json" \
-    -H "X-Api-Key: $ADMIN_API_KEY" \
-    -d '{
-        "Name": "æµ‹è¯•ç”µå½±",
-        "Type": "Movie",
-        "ParentId": "'$LIB_ID'",
-        "Overview": "è¿™æ˜¯ä¸€éƒ¨æµ‹è¯•ç”µå½?,
-        "Year": 2024
-    }')
-
-ITEM_ID=$(echo $ITEM_CREATE | grep -o '"Id":"[^"]*' | cut -d'"' -f4 | head -1)
-if [ ! -z "$ITEM_ID" ]; then
-    echo -e "${GREEN}âœ?{NC} åˆ›å»ºåª’ä½“é¡¹ç›®: $ITEM_ID"
-    TESTS_PASSED=$((TESTS_PASSED + 1))
-else
-    echo -e "${RED}âœ?{NC} åˆ›å»ºåª’ä½“é¡¹ç›®å¤±è´¥"
-    TESTS_FAILED=$((TESTS_FAILED + 1))
-fi
-echo ""
-
-# 7. èŽ·å–åª’ä½“åº“è§†å›?echo -e "${YELLOW}[7] æµ‹è¯•åª’ä½“åº“è§†å›?..${NC}"
-test_endpoint "GET /emby/Users/{id}/Views" "GET" "/emby/Users/$USER_ID/Views" "" "200" \
-    "-H 'X-Emby-Token: $TOKEN'"
-
-# 8. èŽ·å–åª’ä½“é¡¹ç›®åˆ—è¡¨
-echo -e "${YELLOW}[8] æµ‹è¯•åª’ä½“é¡¹ç›®åˆ—è¡¨...${NC}"
-test_endpoint "GET /emby/Users/{id}/Items" "GET" "/emby/Users/$USER_ID/Items?ParentId=$LIB_ID&Limit=20" "" "200" \
-    "-H 'X-Emby-Token: $TOKEN'"
-
-# 9. èŽ·å–åª’ä½“é¡¹ç›®è¯¦æƒ…
-echo -e "${YELLOW}[9] æµ‹è¯•åª’ä½“é¡¹ç›®è¯¦æƒ…...${NC}"
-if [ ! -z "$ITEM_ID" ]; then
-    test_endpoint "GET /emby/Users/{id}/Items/{id}" "GET" "/emby/Users/$USER_ID/Items/$ITEM_ID" "" "200" \
-        "-H 'X-Emby-Token: $TOKEN'"
-fi
-
-# 10. æœç´¢
-echo -e "${YELLOW}[10] æµ‹è¯•æœç´¢åŠŸèƒ½...${NC}"
-test_endpoint "GET /emby/Search/Hints" "GET" "/emby/Search/Hints?SearchTerm=æµ‹è¯•&Limit=10" "" "200" \
-    "-H 'X-Emby-Token: $TOKEN'"
-
-# 11. æ·»åŠ æ’­æ”¾æº?echo -e "${YELLOW}[11] æµ‹è¯•æ·»åŠ æ’­æ”¾æº?..${NC}"
-if [ ! -z "$ITEM_ID" ]; then
-    SOURCE_CREATE=$(curl -s -X POST "$BASE_URL/api/admin/items/$ITEM_ID/sources" \
-        -H "Content-Type: application/json" \
-        -H "X-Api-Key: $ADMIN_API_KEY" \
-        -d '{
-            "Name": "æµ‹è¯•æº?,
-            "URL": "https://example.com/video.mp4",
-            "Container": "mp4",
-            "Bitrate": 5000000
-        }')
-
-    SOURCE_ID=$(echo $SOURCE_CREATE | grep -o '"Id":"[^"]*' | cut -d'"' -f4 | head -1)
-    if [ ! -z "$SOURCE_ID" ]; then
-        echo -e "${GREEN}âœ?{NC} æ·»åŠ æ’­æ”¾æº? $SOURCE_ID"
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-    else
-        echo -e "${YELLOW}âš?{NC} æ·»åŠ æ’­æ”¾æºå¯èƒ½å¤±è´¥ï¼ˆæœªèŽ·å–åˆ° IDï¼?
-    fi
-fi
-echo ""
-
-# 12. PlaybackInfo
-echo -e "${YELLOW}[12] æµ‹è¯• PlaybackInfo...${NC}"
-if [ ! -z "$ITEM_ID" ]; then
-    test_endpoint "POST /emby/Items/{id}/PlaybackInfo" "POST" "/emby/Items/$ITEM_ID/PlaybackInfo" \
-        '{"UserId":"'$USER_ID'","DeviceId":"test-device"}' "200" \
-        "-H 'Content-Type: application/json' -H 'X-Emby-Token: $TOKEN'"
-fi
-
-# 13. æ’­æ”¾è¿›åº¦ä¸ŠæŠ¥
-echo -e "${YELLOW}[13] æµ‹è¯•æ’­æ”¾è¿›åº¦ä¸ŠæŠ¥...${NC}"
-if [ ! -z "$ITEM_ID" ]; then
-    test_endpoint "POST /emby/Sessions/Playing/Progress" "POST" "/emby/Sessions/Playing/Progress" \
-        '{"ItemId":"'$ITEM_ID'","PositionTicks":1000000}' "204" \
-        "-H 'Content-Type: application/json' -H 'X-Emby-Token: $TOKEN'"
-fi
-
-# 14. æ ‡è®°ä¸ºå·²çœ?echo -e "${YELLOW}[14] æµ‹è¯•æ ‡è®°å·²çœ‹...${NC}"
-if [ ! -z "$ITEM_ID" ]; then
-    test_endpoint "POST /emby/Users/{id}/PlayedItems/{id}" "POST" "/emby/Users/$USER_ID/PlayedItems/$ITEM_ID" "" "204" \
-        "-H 'X-Emby-Token: $TOKEN'"
-fi
-
-# 15. æ ‡è®°ä¸ºæ”¶è—?echo -e "${YELLOW}[15] æµ‹è¯•æ ‡è®°æ”¶è—...${NC}"
-if [ ! -z "$ITEM_ID" ]; then
-    test_endpoint "POST /emby/Users/{id}/FavoriteItems/{id}" "POST" "/emby/Users/$USER_ID/FavoriteItems/$ITEM_ID" "" "204" \
-        "-H 'X-Emby-Token: $TOKEN'"
-fi
-
-# 16. ç»§ç»­è§‚çœ‹
-echo -e "${YELLOW}[16] æµ‹è¯•ç»§ç»­è§‚çœ‹...${NC}"
-test_endpoint "GET /emby/Users/{id}/Items/Resume" "GET" "/emby/Users/$USER_ID/Items/Resume?Limit=10" "" "200" \
-    "-H 'X-Emby-Token: $TOKEN'"
-
-# 17. èŽ·å–ç»Ÿè®¡ä¿¡æ¯
-echo -e "${YELLOW}[17] æµ‹è¯•èŽ·å–ç»Ÿè®¡ä¿¡æ¯...${NC}"
-test_endpoint "GET /api/admin/stats" "GET" "/api/admin/stats" "" "200" \
-    "-H 'X-Api-Key: $ADMIN_API_KEY'"
-
-# æ¸…ç†
-echo -e "${YELLOW}[18] æ¸…ç†...${NC}"
-if [ ! -z "$FAKEMBY_PID" ]; then
-    kill $FAKEMBY_PID 2>/dev/null || true
-    sleep 1
-fi
-
-# æœ€ç»ˆæŠ¥å‘?echo ""
-echo "========================================"
-echo "æµ‹è¯•ç»“æžœ"
-echo "========================================"
-echo -e "${GREEN}é€šè¿‡: $TESTS_PASSED${NC}"
-echo -e "${RED}å¤±è´¥: $TESTS_FAILED${NC}"
+echo "FakEmby Ã°ÑÌ²âÊÔ"
 echo "========================================"
 
-if [ $TESTS_FAILED -eq 0 ]; then
-    echo -e "${GREEN}âœ?æ‰€æœ‰æµ‹è¯•é€šè¿‡ï¼?{NC}"
-    exit 0
+if [ -n "${FAKEMBY_SMOKE_BASE_URL:-}" ]; then
+    echo "Ä¿±ê£º»îÌå·þÎñ ${FAKEMBY_SMOKE_BASE_URL}"
 else
-    echo -e "${RED}âœ?æœ‰æµ‹è¯•å¤±è´?{NC}"
-    exit 1
+    echo "Ä¿±ê£º½ø³ÌÄÚ·þÎñ£¨ÄÚ´æ¿â£¬ÎÞÐèÍâ²¿ÒÀÀµ£©"
 fi
+echo ""
+
+go test ./tests/integration/... -run TestSmoke -count=1 -v
+
+echo ""
+echo "? Ã°ÑÌÍ¨¹ý"
