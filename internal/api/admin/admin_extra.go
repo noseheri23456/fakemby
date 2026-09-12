@@ -296,9 +296,10 @@ func validateAdminPolicy(raw map[string]json.RawMessage) (map[string]any, error)
 		name := strings.Split(field.Tag.Get("json"), ",")[0]
 		fields[name] = field
 	}
-	// Policy enforcement can consume these even before the Emby DTO exposes them.
+	// M3-6：BlockUnratedItems 已进 UserPolicy DTO，这里不用再手工注册。
+	// MaxParentalRating 仍注册成非指针 int——管理端保留「不允许 null」的语义，
+	// 想解除限制请传具体值或直接删掉该字段（本端点是部分更新）。
 	fields["MaxParentalRating"] = reflect.StructField{Type: reflect.TypeOf(int(0))}
-	fields["BlockUnratedItems"] = reflect.StructField{Type: reflect.TypeOf([]string{})}
 	out := map[string]any{}
 	for key, data := range raw {
 		field, ok := fields[key]

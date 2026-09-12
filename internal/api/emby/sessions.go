@@ -157,6 +157,7 @@ func getSessions() gin.HandlerFunc {
 		c.JSON(200, out)
 	}
 }
+
 // userSessions 返回某用户的活动会话快照。
 // 恒返回非 nil 切片——websocket 与 HTTP 两条链路共用，客户端会直接 `.filter`/`.length`。
 func userSessions(userID string) []SessionInfo {

@@ -203,7 +203,7 @@ internal/
 | M3-3 ✅ | **真实 WebSocket**（修 A8） | **v1.7 实况复核：gorilla/websocket 的帧收发、ping/pong 心跳、按用户广播在之前的历史提交里其实已经落地**，本轮做的是把它补成「能扛真实客户端」的形态：① **订阅协议**——官方客户端 `onopen` 后补发 `<Name>Start`（Data 是 `"0,1500,0,true,true"` 这类字符串）并期望同名首帧，原先完全不回包，客户端只能退化成定时轮询；现 `Sessions` 回该用户会话快照、`ScheduledTasksInfo`/`ActivityLogEntry` 回空数组（不能是 `null`）；② **业务事件补全**——已看/收藏也推 `UserDataChanged`（原先只有播放进度推），`Sessions` 快照里的 `PlayableMediaTypes`/`SupportedCommands`/`AdditionalUsers` 初始化为空切片（客户端裸调 `.includes`）；③ **健壮性**——连接上限（超出 503）、队列满计数而非阻塞、建连下发 `ForceKeepAlive`、关闭时先发 `ServerShuttingDown` 再发 1001 关闭帧、心跳参数可配（测试压到 50ms）；④ 顺带修掉一个**自死锁**：播放上报持 `activeSessionsMu` 写锁时回调了会取读锁的 `userSessions`，任何一次进度上报都会把整个请求挂死 | `go test ./internal/infra/ws/ ./internal/emby/` 全绿；Emby Theater 连接后不再轮询（日志里 `/emby/Sessions` 周期性请求消失） |
 | M3-4 | **签名与防盗链闭环**（接 M0-7） | 可选 IP 绑定、`redirect_mode: signed\|plain` 灰度开关、签名审计日志 | 新旧源混跑期间可逐前缀切换 |
 | M3-5 | **搜索增强** | 现仅 `Search/Hints`。加拼音/别名匹配、按类型加权、结果高亮字段。**拼音走本地库或自建映射表，不引入任何在线查询** | 中文标题模糊搜索命中率提升 |
-| M3-6 | **多用户策略生效** | `User.Policy` 目前只是 JSON 字符串。实现按用户/库的访问控制（EnabledFolders/BlockedMediaFolders）、并发会话数限制、家长分级（OfficialRating） | 受限用户看不到被屏蔽的库 |
+| M3-6 ✅ | **多用户策略生效** | **v1.7 实况复核：清单里要做的三件事早就做完了**——`internal/access` 已实现按库访问控制（EnabledFolders/BlockedMediaFolders，黑名单优先）、家长分级（MaxParentalRating + BlockUnratedItems）、并发会话数限制（SimultaneousStreamLimit → 429），而且是**递归 SQL CTE** 实现的：祖先被拒则所有后代（含未分级子集）一并拒绝，策略解析失败即 `1=0` 全拒（fail-closed）。本轮补的是**「DTO 与 enforcement 脱节」**这一真实缺口：① `MaxParentalRating`/`BlockUnratedItems` enforcement 一直在用，但 `UserPolicy` DTO 没暴露——官方客户端「GET 用户 → 改开关 → POST 回 `/emby/Users/{id}/Policy`」的往返会把它们静默清空，而**清空家长分级是放开限制而不是收紧**（fail-open）；② `POST /emby/Users/{id}/Policy` 落盘前不校验，写坏的策略在 enforcement 侧等于全拒、管理 UI 却显示默认值，排障无从下手——现在用 `access.Normalize` 校验，非法返回 400；③ `internal/access` 这个最关键的包**此前零测试**，补了 7 组单测（Normalize 严格性、黑白名单、分级边界、SessionLimit） | `go test ./internal/access/ ./internal/emby/` 全绿；`Policy` 往返后家长分级无损；非法策略 400 |
 | M3-7 | **批量导入增强** | 增量更新（按 `Id` 或 `ProviderIds` 幂等 upsert，不再依赖外部 ID 抓取）、导入前校验、dry-run、失败重试 | 重复导入同一批数据不产生重复条目 |
 | M3-8 | 数据与配置导出/导入 | `fakemby export` / `import` 子命令，产出可迁移 JSON 快照 | 换机迁移 5 分钟完成 |
 | M3-9 ✅ | **刮削器预留清理** | 删除配置/文档里「已预留但无实现」的刮削残留：`config.yaml` 与 `dist/config.yaml` 的 `tmdb:` 段、`docker-compose.yml` 的 `FAKEMBY_TMDB_*`、`CLAUDE.md`/`ARCHITECTURE.md` 的 tmdb 描述。**`ProviderIds`（IMDB/TMDB/TVDB）作为外部 ID 字段保留**——只存标识、不发起抓取 | 全仓库 `grep -ri tmdb` 只剩 ProviderIds 相关说明；符合 §5 原则 4「文档写了没实现就删掉」 |
@@ -664,7 +664,7 @@ M3 期间若再现需专项排查。
 
 ## 修订记录
 
-### v1.7（2026-09-13 凌晨 M3-3 复核）
+### v1.7（2026-09-13 凌晨 M3-3 + M3-6 复核）
 
 1. **M3-3 完成**：补订阅协议（`<Name>Start` → 同名首帧）、已看/收藏也推 `UserDataChanged`、
    `Sessions` 快照数组字段初始化、连接上限与背压计数、`ForceKeepAlive`/`ServerShuttingDown`、
@@ -674,6 +674,12 @@ M3 期间若再现需专项排查。
 3. **修 panic**：`Hub.Close()` 与连接清理并发导致 `send on closed channel`，改用带状态位的
    `trySend/closeSend`。
 4. A8 状态更新为「M3-3 已修」。
+5. **M3-6 完成（实况：清单里的功能早已落地）**：真正缺口是 DTO 与 enforcement 脱节——
+   家长分级两字段 enforcement 在用但 DTO 未暴露，客户端往返会**静默清空**（fail-open）。
+   已补 DTO 字段 + `POST /emby/Users/{id}/Policy` 写前校验 + `internal/access` 单测（此前零覆盖）。
+6. **null 总闸加白名单 `MaxParentalRating`**：官方是可空 int，客户端
+   `parentalcontroltab.js` 保存时自己写 `|| null`、读取有判空守卫。同文件的
+   `BlockUnratedItems` 被裸调 `.indexOf`，必须恒为数组——**白名单必须逐字段拿客户端源码举证**。
 
 ### v1.6（2026-09-13 凌晨 M3-2 复核）
 

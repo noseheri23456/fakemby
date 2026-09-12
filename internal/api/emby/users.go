@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/fakemby/fakemby/internal/access"
 	"github.com/fakemby/fakemby/internal/config"
 	"github.com/fakemby/fakemby/internal/database"
 	"github.com/fakemby/fakemby/internal/service"
@@ -164,6 +165,16 @@ func setUserPolicy() gin.HandlerFunc {
 		if err != nil {
 			slog.Error("Failed to marshal policy", "error", err)
 			c.JSON(http.StatusInternalServerError, ErrInternal)
+			return
+		}
+
+		// 落盘前用 enforcement 同一套规则（access.Normalize）校验。
+		// 写坏的策略在 enforcement 侧等于「全拒」（Normalize 失败即 1=0），
+		// 但管理 UI 会按默认值显示，排障时完全看不出原因——宁可 400 也不存坏数据。
+		candidate := user
+		candidate.Policy = string(policyBytes)
+		if _, err := access.Normalize(&candidate); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"StatusCode": http.StatusBadRequest, "Message": "Invalid policy"})
 			return
 		}
 

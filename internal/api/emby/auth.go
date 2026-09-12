@@ -45,34 +45,41 @@ type UserDTO struct {
 }
 
 type UserPolicy struct {
-	IsAdministrator                 bool     `json:"IsAdministrator"`
-	IsHidden                        bool     `json:"IsHidden"`
-	IsHiddenRemotely                bool     `json:"IsHiddenRemotely"`
-	IsDisabled                      bool     `json:"IsDisabled"`
-	EnableRemoteControlOfOtherUsers bool     `json:"EnableRemoteControlOfOtherUsers"`
-	EnableSharedDeviceControl       bool     `json:"EnableSharedDeviceControl"`
-	EnableRemoteAccess              bool     `json:"EnableRemoteAccess"`
-	EnableLiveTvManagement          bool     `json:"EnableLiveTvManagement"`
-	EnableLiveTvAccess              bool     `json:"EnableLiveTvAccess"`
-	EnableMediaPlayback             bool     `json:"EnableMediaPlayback"`
-	EnableAudioPlaybackTranscoding  bool     `json:"EnableAudioPlaybackTranscoding"`
-	EnableVideoPlaybackTranscoding  bool     `json:"EnableVideoPlaybackTranscoding"`
-	EnablePlaybackRemuxing          bool     `json:"EnablePlaybackRemuxing"`
-	EnableContentDeletion           bool     `json:"EnableContentDeletion"`
-	EnableContentDownloading        bool     `json:"EnableContentDownloading"`
-	EnableSubtitleDownloading       bool     `json:"EnableSubtitleDownloading"`
-	EnableSubtitleManagement        bool     `json:"EnableSubtitleManagement"`
-	EnableSyncTranscoding           bool     `json:"EnableSyncTranscoding"`
-	EnableMediaConversion           bool     `json:"EnableMediaConversion"`
-	EnableAllDevices                bool     `json:"EnableAllDevices"`
-	EnableAllFolders                bool     `json:"EnableAllFolders"`
+	IsAdministrator                 bool `json:"IsAdministrator"`
+	IsHidden                        bool `json:"IsHidden"`
+	IsHiddenRemotely                bool `json:"IsHiddenRemotely"`
+	IsDisabled                      bool `json:"IsDisabled"`
+	EnableRemoteControlOfOtherUsers bool `json:"EnableRemoteControlOfOtherUsers"`
+	EnableSharedDeviceControl       bool `json:"EnableSharedDeviceControl"`
+	EnableRemoteAccess              bool `json:"EnableRemoteAccess"`
+	EnableLiveTvManagement          bool `json:"EnableLiveTvManagement"`
+	EnableLiveTvAccess              bool `json:"EnableLiveTvAccess"`
+	EnableMediaPlayback             bool `json:"EnableMediaPlayback"`
+	EnableAudioPlaybackTranscoding  bool `json:"EnableAudioPlaybackTranscoding"`
+	EnableVideoPlaybackTranscoding  bool `json:"EnableVideoPlaybackTranscoding"`
+	EnablePlaybackRemuxing          bool `json:"EnablePlaybackRemuxing"`
+	EnableContentDeletion           bool `json:"EnableContentDeletion"`
+	EnableContentDownloading        bool `json:"EnableContentDownloading"`
+	EnableSubtitleDownloading       bool `json:"EnableSubtitleDownloading"`
+	EnableSubtitleManagement        bool `json:"EnableSubtitleManagement"`
+	EnableSyncTranscoding           bool `json:"EnableSyncTranscoding"`
+	EnableMediaConversion           bool `json:"EnableMediaConversion"`
+	EnableAllDevices                bool `json:"EnableAllDevices"`
+	EnableAllFolders                bool `json:"EnableAllFolders"`
 	// 注意：这两个数组字段**不能**带 omitempty。官方客户端会裸调
 	// `Policy.EnabledFolders.includes(...)`，空切片被 omitempty 省略后
 	// 客户端拿到 undefined，直接 TypeError 炸断渲染链（M3-1 审计发现）。
-	EnabledFolders                  []string `json:"EnabledFolders"`
-	BlockedMediaFolders             []string `json:"BlockedMediaFolders"`
-	SimultaneousStreamLimit         int      `json:"SimultaneousStreamLimit"`
-	AllowCameraUpload               bool     `json:"AllowCameraUpload"`
+	EnabledFolders      []string `json:"EnabledFolders"`
+	BlockedMediaFolders []string `json:"BlockedMediaFolders"`
+	// 家长分级。M3-6：这两个字段 enforcement（internal/access）一直在用，
+	// 但 DTO 没暴露——客户端「GET 用户 → 改开关 → POST 回 Policy」的往返会把它们
+	// 悄悄清空，而清空家长分级是**放开**限制而不是收紧。必须进 DTO 才能闭环。
+	// MaxParentalRating 用指针：null 表示不限制，与官方一致（官方也返回 null）。
+	MaxParentalRating *int `json:"MaxParentalRating"`
+	// BlockUnratedItems 同样不能带 omitempty（数组字段，客户端裸调 .includes）。
+	BlockUnratedItems       []string `json:"BlockUnratedItems"`
+	SimultaneousStreamLimit int      `json:"SimultaneousStreamLimit"`
+	AllowCameraUpload       bool     `json:"AllowCameraUpload"`
 }
 
 // UserConfig 对齐官方 Emby 的 UserConfiguration。数组字段必须保证序列化为
@@ -168,6 +175,7 @@ func GetUserPolicy(u *database.User) UserPolicy {
 		EnableAllFolders:         true, // Default to true if not set
 		EnabledFolders:           []string{},
 		BlockedMediaFolders:      []string{},
+		BlockUnratedItems:        []string{},
 	}
 	if u.Policy != "" {
 		if err := json.Unmarshal([]byte(u.Policy), &policy); err != nil {

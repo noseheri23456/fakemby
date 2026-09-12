@@ -48,6 +48,12 @@ import (
 var nullAllowlist = map[string]string{
 	// Emby 官方在无主键图时确实返回 null，客户端统一走 `imageTag || default` 分支。
 	"PrimaryImageAspectRatio": "官方在无图条目上返回 null，客户端有判空分支",
+	// MaxParentalRating 是官方的可空 int（int?），「未设置家长分级」在官方服务器上
+	// 就是 null。证据：users/parentalcontroltab.js 保存时自己写
+	// `MaxParentalRating = select.value || null`，读取处也有 `if (user.Policy.MaxParentalRating)`
+	// 守卫——null 是契约而非缺陷。同文件的 BlockUnratedItems 则被裸调
+	// `.indexOf(...)`，所以那个字段必须恒为数组（已初始化为空切片）。
+	"MaxParentalRating": "官方可空 int，客户端写入即为 null 且读取有判空守卫（parentalcontroltab.js）",
 }
 
 // collectNulls 递归收集 JSON 里所有值为 null 的路径。
