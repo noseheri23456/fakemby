@@ -1,7 +1,6 @@
 package emby_test
 
 import (
-	"encoding/json"
 	"github.com/fakemby/fakemby/internal/database"
 	"github.com/fakemby/fakemby/internal/testutil"
 	"github.com/gorilla/websocket"
@@ -91,11 +90,8 @@ func TestRoadmapWebSocketReceivesOwnEvents(t *testing.T) {
 	require.Equal(t, 101, resp.StatusCode)
 	payload := []byte(`{"ItemId":"` + testutil.MovieID + `","PlaySessionId":"ws-test","PositionTicks":333}`)
 	require.Equal(t, 204, a.post("/emby/Sessions/Playing/Progress", testutil.NormalToken, payload).Status)
-	require.NoError(t, conn.SetReadDeadline(time.Now().Add(3*time.Second)))
-	_, data, err := conn.ReadMessage()
-	require.NoError(t, err)
-	var event map[string]any
-	require.NoError(t, json.Unmarshal(data, &event))
+	// 建连时服务端会先发 ForceKeepAlive，这里只关心业务事件，跳过无关消息。
+	event := wsReadUntil(t, conn, "UserDataChanged", 3*time.Second)
 	assert.Equal(t, "UserDataChanged", event["MessageType"])
 	require.Equal(t, 204, a.post("/emby/Sessions/Playing/Stopped", testutil.NormalToken, payload).Status)
 }

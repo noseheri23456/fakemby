@@ -15,15 +15,31 @@ import (
 	"time"
 )
 
-var eventHub = ws.New()
+var eventHub = ws.New(ws.DefaultOptions())
 
 func ShutdownWebSockets() { eventHub.Close() }
+
 func RegisterWebSocketRoutes(r *gin.Engine, cfg *config.Config) {
-	for _, path := range []string{"/embywebsocket", "/embysocket", "/emby/embysocket"} {
+	eventHub.SetSnapshotProvider(websocketSnapshot)
+	for _, path := range []string{"/embywebsocket", "/embysocket", "/emby/embysocket", "/emby/embywebsocket"} {
 		r.GET(path, AuthTokenMiddleware(cfg.TokenExpiryDays()), func(c *gin.Context) {
 			eventHub.Serve(c.Writer, c.Request, c.GetString("user_id"), cfg.Server.CORSOrigins)
 		})
 	}
+}
+
+// websocketSnapshot 回应客户端的订阅请求（`<Name>Start`）。
+// 官方客户端在 onopen 后会为已注册的监听器补发 Start，服务端不回包虽不报错，
+// 但客户端会退化成定时轮询。Data 一律返回数组——客户端对 Data 零容错。
+func websocketSnapshot(user, name, options string) (any, bool) {
+	switch name {
+	case "Sessions":
+		return userSessions(user), true
+	case "ScheduledTasksInfo", "ActivityLogEntry":
+		// 没有计划任务与活动日志的实现，回空数组而不是 null。
+		return []any{}, true
+	}
+	return nil, false
 }
 
 type requestStat struct {

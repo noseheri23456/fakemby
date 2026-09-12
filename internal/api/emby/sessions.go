@@ -157,6 +157,25 @@ func getSessions() gin.HandlerFunc {
 		c.JSON(200, out)
 	}
 }
+// userSessions 返回某用户的活动会话快照。
+// 恒返回非 nil 切片——websocket 与 HTTP 两条链路共用，客户端会直接 `.filter`/`.length`。
+func userSessions(userID string) []SessionInfo {
+	activeSessionsMu.RLock()
+	defer activeSessionsMu.RUnlock()
+	return sessionsOfLocked(userID)
+}
+
+// sessionsOfLocked 在调用方已持有 activeSessionsMu（读或写）时使用。
+// 播放上报全程持有写锁，此时绝不能再调 userSessions，否则自死锁。
+func sessionsOfLocked(userID string) []SessionInfo {
+	out := []SessionInfo{}
+	for _, s := range activeSessions {
+		if s.UserId == userID {
+			out = append(out, *s)
+		}
+	}
+	return out
+}
 func stopSession() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		activeSessionsMu.Lock()
@@ -281,16 +300,24 @@ func recordPlayback(stopped bool) gin.HandlerFunc {
 		if stopped {
 			delete(activeSessions, sid)
 		} else {
-			activeSessions[sid] = &SessionInfo{Id: sid, UserId: userID, UserName: user.Name, LastActivityDate: now.Format(time.RFC3339), RemoteEndPoint: c.ClientIP(), NowPlayingItem: &NowPlayingItem{item.ID, item.Name, item.Type}, PlayState: PlayState{PositionTicks: &req.PositionTicks, IsPaused: req.IsPaused}}
-		}
-		eventHub.Broadcast(userID, "UserDataChanged", gin.H{"UserId": userID, "UserDataList": []gin.H{{"ItemId": item.ID, "PlaybackPositionTicks": req.PositionTicks}}})
-		sessions := []SessionInfo{}
-		for _, s := range activeSessions {
-			if s.UserId == userID {
-				sessions = append(sessions, *s)
+			// 数组字段一律初始化为空切片：客户端会裸调 `.includes`/`.length`（见 ROADMAP §10）。
+			activeSessions[sid] = &SessionInfo{
+				Id: sid, UserId: userID, UserName: user.Name,
+				LastActivityDate: now.Format(time.RFC3339), RemoteEndPoint: c.ClientIP(),
+				AdditionalUsers:    []UserDTO{},
+				PlayableMediaTypes: []string{},
+				SupportedCommands:  []string{},
+				Capabilities: Capabilities{
+					PlayableMediaTypes: []string{},
+					SupportedCommands:  []string{},
+				},
+				NowPlayingItem: &NowPlayingItem{item.ID, item.Name, item.Type},
+				PlayState:      PlayState{PositionTicks: &req.PositionTicks, IsPaused: req.IsPaused},
 			}
 		}
-		eventHub.Broadcast(userID, "Sessions", sessions)
+		eventHub.Broadcast(userID, "UserDataChanged", gin.H{"UserId": userID, "UserDataList": []gin.H{{"ItemId": item.ID, "PlaybackPositionTicks": req.PositionTicks}}})
+		// 会话快照必须在写锁内取好：此处调用 userSessions 会重复加读锁而自死锁。
+		eventHub.Broadcast(userID, "Sessions", sessionsOfLocked(userID))
 		c.Status(204)
 	}
 }

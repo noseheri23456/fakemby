@@ -90,7 +90,7 @@
 | **A5** | 登录接口无限流、无失败锁定；且 Basic Auth 路径**每个请求铸造一个新 token**（无限增发） | `auth.go:173`、`488` |
 | **A6** | 图片 proxy_cache 无体积上限 / LRU 淘汰，磁盘无限增长 | `service/image.go` |
 | **A7** | 进度缓冲 30s 窗口，进程被 kill -9 即丢数据 | `sessions.go:87-144` |
-| **A8** | WebSocket 是**假实现**——只循环读字节然后丢弃，无帧解析、无心跳、无广播 | `main.go:120-160` |
+| **A8** | WebSocket 是**假实现**——只循环读字节然后丢弃，无帧解析、无心跳、无广播 | `main.go:120-160` → **M3-3 已修**（`internal/infra/ws/hub.go`） |
 | **A9** | 配置端口不一致：本地 `config.yaml` 是 9096，README/compose/Dockerfile 全是 8096 | `config.yaml:3` |
 | **A10** | 字幕索引错位：`PlaybackInfo` 里字幕流 `Index` 用的是**全局流序号**，但 `/Subtitles/:index/Stream` 用的是 **subtitles 表下标**，两者对不上 | `playback.go:127` vs `playback.go:267` |
 
@@ -200,7 +200,7 @@ internal/
 |----|------|------|----------|
 | M3-1 ⏳ | **官方客户端兼容基线**（最高优先级） | ① 把真实客户端的请求序列固化成回归资产：解析 `dist/server.log` 得到「登录→首页→点磁贴→进库→点条目→详情→播放」的请求轨迹，生成断言用例；② **响应字段安全审计**：客户端对数组/对象字段存在大量裸调用（`.length`/`.includes`/`.filter`），凡被裸调用的字段服务端必须恒返回 `[]`/`{}` 而非缺失或 `null`，逐条补契约测试；③ 已修必补项（`System/Endpoint`、`User.Configuration` 全字段、条目详情支持媒体库 ID、`RequiredHttpHeaders`）全部钉死为回归用例 | Emby Theater 3.0.20 全流程无 `Content no longer available`；`scripts/dev/probe_theater.py` 升级为可断言套件并进 CI |
 | M3-2 | **补齐缺失端点**（按实测差异排序） | **v1.6 复核：v1.4 列的 6 个「实测 404」里 5 个其实已随 M2 重构落地**（`NextUp`、`Items/Filters`、`Channels`、`Genres`、`Studios` 均 200），真正缺的只剩 `LiveTv/Channels`。本轮实测又发现 3 个**契约形态**问题（不是 404 但同样会崩）：`Ancestors` 因 nil 切片返回 `null`、`QuickConnect/Enabled` 返回裸布尔而非 `{"Enabled":false}`、`LiveTv/Channels` 404。均已修。次要项：`/Genres`、`/Studios`、`/Persons/{id}`、`/Items/{id}/Intros`、`/Playlists`、`/Collections` 已实现（可返回空集合） | 首页/详情页/库浏览三个场景无 404；列表端点返回结构正确（允许空） |
-| M3-3 | **真实 WebSocket**（修 A8） | RFC6455 帧解析/编码 + ping/pong 心跳 + Session Hub 广播（`Sessions`、`UserDataChanged`、`LibraryChanged`），可用 `gorilla/websocket` 或 `coder/websocket` | 客户端能收到实时更新，长时间连接不掉 |
+| M3-3 ✅ | **真实 WebSocket**（修 A8） | **v1.7 实况复核：gorilla/websocket 的帧收发、ping/pong 心跳、按用户广播在之前的历史提交里其实已经落地**，本轮做的是把它补成「能扛真实客户端」的形态：① **订阅协议**——官方客户端 `onopen` 后补发 `<Name>Start`（Data 是 `"0,1500,0,true,true"` 这类字符串）并期望同名首帧，原先完全不回包，客户端只能退化成定时轮询；现 `Sessions` 回该用户会话快照、`ScheduledTasksInfo`/`ActivityLogEntry` 回空数组（不能是 `null`）；② **业务事件补全**——已看/收藏也推 `UserDataChanged`（原先只有播放进度推），`Sessions` 快照里的 `PlayableMediaTypes`/`SupportedCommands`/`AdditionalUsers` 初始化为空切片（客户端裸调 `.includes`）；③ **健壮性**——连接上限（超出 503）、队列满计数而非阻塞、建连下发 `ForceKeepAlive`、关闭时先发 `ServerShuttingDown` 再发 1001 关闭帧、心跳参数可配（测试压到 50ms）；④ 顺带修掉一个**自死锁**：播放上报持 `activeSessionsMu` 写锁时回调了会取读锁的 `userSessions`，任何一次进度上报都会把整个请求挂死 | `go test ./internal/infra/ws/ ./internal/emby/` 全绿；Emby Theater 连接后不再轮询（日志里 `/emby/Sessions` 周期性请求消失） |
 | M3-4 | **签名与防盗链闭环**（接 M0-7） | 可选 IP 绑定、`redirect_mode: signed\|plain` 灰度开关、签名审计日志 | 新旧源混跑期间可逐前缀切换 |
 | M3-5 | **搜索增强** | 现仅 `Search/Hints`。加拼音/别名匹配、按类型加权、结果高亮字段。**拼音走本地库或自建映射表，不引入任何在线查询** | 中文标题模糊搜索命中率提升 |
 | M3-6 | **多用户策略生效** | `User.Policy` 目前只是 JSON 字符串。实现按用户/库的访问控制（EnabledFolders/BlockedMediaFolders）、并发会话数限制、家长分级（OfficialRating） | 受限用户看不到被屏蔽的库 |
@@ -626,9 +626,54 @@ M3 期间若再现需专项排查。
 `TestAncestorsReturnsArrayNotNil`、`TestQuickConnectEnabledReturnsObject`。
 
 
+**M3-3 真实 WebSocket · 完成（v1.7 复核：A8 大半已修，本轮补的是协议与健壮性）**
+
+读 `Emby Theater/electronapp/www/modules/emby-apiclient/apiclient.js` 确认三件事：
+1. 连接地址是 `getUrl("socket")` 把 `emby/socket` 替换成 `embywebsocket`，
+   即 `/embywebsocket?api_key=<token>&deviceId=<id>`——**鉴权走查询参数**（`AuthTokenMiddleware`
+   已支持 `api_key`，本轮补 `/emby/embywebsocket` 路由并加了 401 反向用例）；
+2. `onopen` 后客户端把已注册的监听器**补发一遍** `<Name>Start`（`Data` 是 `"0,1500,0,true,true"`
+   这类字符串），服务端不回包虽不报错，但客户端会退化成定时轮询
+   （`components/taskbutton.js` 里 `isMessageChannelOpen() || pollTasks()` 就是兜底）；
+3. 该版本客户端**没有** KeepAlive 逻辑，但官方服务器会下发 `ForceKeepAlive`，照做即可，
+   未知 MessageType 会被忽略。
+
+本轮改动（`internal/infra/ws/hub.go` 重写）：
+- 订阅表 + `SetSnapshotProvider` 回调：`<Name>Start` 回同名首帧，`<Name>Stop` 取消订阅；
+  `Sessions` 回该用户会话快照，`ScheduledTasksInfo`/`ActivityLogEntry` 回 `[]`。
+- 心跳参数可配（生产 25s/70s，测试压到 50ms 验证「长时间连接不掉」）；收到任何帧都续期读超时，
+  避免中间设备吞掉 ping 后误杀连接。
+- 连接上限（超了 503）、队列满计数 + 关连接而不是阻塞业务请求、关闭时先 `ServerShuttingDown`
+  再由 writePump 发关闭帧（同步写 close 帧会抢在文本帧前面，导致告别消息根本没送达）。
+- `Event.Data` 改 `omitempty`：`KeepAlive` 序列化成 `{"MessageType":"KeepAlive"}`，
+  与官方一致；凡客户端会读 Data 的事件仍必须传非 nil。
+
+**踩到的两个真 bug**（都是改出来的，值得记）：
+1. **自死锁**：播放上报全程持 `activeSessionsMu` 写锁，我在末尾调了会取读锁的 `userSessions`
+   → 任何一次进度上报都把请求挂死。表现是 `go test ./internal/emby/` 从 2s 变成 3m23s 超时。
+   修法是拆出 `sessionsOfLocked`（假定已持锁）。**在持锁路径上加 helper 前先确认它会不会回头加锁。**
+2. **`Close()` 里 send on closed channel**：Close 先快照连接列表、释放锁，之后客户端断连已关掉
+   `send` 通道，Close 再写就 panic。改成 `client.trySend/closeSend` 用状态位保护。
+
+回归资产：`internal/infra/ws/hub_test.go`（心跳/扇出/订阅/背压/上限/关闭共 8 例）
++ `internal/emby/websocket_test.go`（401、三条路径握手、订阅快照、KeepAlive、
+  UserDataChanged 业务事件、跨用户隔离共 6 例）。
+
+
 ---
 
 ## 修订记录
+
+### v1.7（2026-09-13 凌晨 M3-3 复核）
+
+1. **M3-3 完成**：补订阅协议（`<Name>Start` → 同名首帧）、已看/收藏也推 `UserDataChanged`、
+   `Sessions` 快照数组字段初始化、连接上限与背压计数、`ForceKeepAlive`/`ServerShuttingDown`、
+   心跳参数可配。
+2. **修自死锁**：播放上报持写锁时回调取读锁的 helper，任何进度上报都会挂死——拆成
+   `sessionsOfLocked`。
+3. **修 panic**：`Hub.Close()` 与连接清理并发导致 `send on closed channel`，改用带状态位的
+   `trySend/closeSend`。
+4. A8 状态更新为「M3-3 已修」。
 
 ### v1.6（2026-09-13 凌晨 M3-2 复核）
 

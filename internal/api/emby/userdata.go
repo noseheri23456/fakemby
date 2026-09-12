@@ -8,6 +8,7 @@ import (
 	"github.com/fakemby/fakemby/internal/config"
 	"github.com/fakemby/fakemby/internal/database"
 	"github.com/fakemby/fakemby/internal/service"
+	"github.com/fakemby/fakemby/internal/types"
 	"github.com/gin-gonic/gin"
 )
 
@@ -57,6 +58,7 @@ func markAsPlayed(playSvc *service.PlaybackService, mediaSvc *service.MediaServi
 			return
 		}
 		dto := mediaSvc.ItemToDTO(item, userID, nil)
+		broadcastUserDataChange(userID, dto.UserData)
 		c.JSON(http.StatusOK, dto.UserData)
 	}
 }
@@ -82,6 +84,7 @@ func unmarkAsPlayed(playSvc *service.PlaybackService, mediaSvc *service.MediaSer
 			return
 		}
 		dto := mediaSvc.ItemToDTO(item, userID, nil)
+		broadcastUserDataChange(userID, dto.UserData)
 		c.JSON(http.StatusOK, dto.UserData)
 	}
 }
@@ -107,6 +110,7 @@ func markAsFavorite(playSvc *service.PlaybackService, mediaSvc *service.MediaSer
 			return
 		}
 		dto := mediaSvc.ItemToDTO(item, userID, nil)
+		broadcastUserDataChange(userID, dto.UserData)
 		c.JSON(http.StatusOK, dto.UserData)
 	}
 }
@@ -132,8 +136,22 @@ func unmarkAsFavorite(playSvc *service.PlaybackService, mediaSvc *service.MediaS
 			return
 		}
 		dto := mediaSvc.ItemToDTO(item, userID, nil)
+		broadcastUserDataChange(userID, dto.UserData)
 		c.JSON(http.StatusOK, dto.UserData)
 	}
+}
+
+// broadcastUserDataChange 通知该用户所有在线客户端刷新条目状态。
+// UserDataList 必须是非空数组——客户端直接读 `Data.UserDataList[0]` 之类，
+// 给 null 会当场 TypeError（见 docs/ROADMAP.md §10）。
+func broadcastUserDataChange(userID string, data *types.UserItemDataDto) {
+	if data == nil {
+		return
+	}
+	eventHub.Broadcast(userID, "UserDataChanged", gin.H{
+		"UserId":       userID,
+		"UserDataList": []*types.UserItemDataDto{data},
+	})
 }
 
 func getResumeItems(playSvc *service.PlaybackService, mediaSvc *service.MediaService) gin.HandlerFunc {
