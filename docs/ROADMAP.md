@@ -700,7 +700,7 @@ GoReleaser 产物写入 `dist/release`（与运行时 `dist` 分离），chart �
 | Docker 构建 | Go 1.26.3 + BuildKit 目标平台参数（不再强制 amd64）；运行镜像 UID/GID 10001，仅含二进制与运行时包，不含仓库配置与本地数据 |
 | Secrets | `FAKEMBY_ADMIN_API_KEY` / `FAKEMBY_PLAYBACK_SIGN_KEY` 须由 shell 或密钥管理器提供，不再随镜像带占位凭据；删除无用 scraper env；应用**不**支持 `secret_file`/`*_FILE`，挂密钥文件不会生效 |
 | 日志 | 容器文件日志重定向 `/dev/null`，应用日志仍写 stderr；DB 与图片缓存落在 `/app/data` |
-| 探针 | 复用既有 `GET /emby/System/Info/Public` 做 HTTP 就绪/存活检查（只验可达性，不谎称数据库就绪），未新增健康端点 |
+| 探针 | 容器健康检查命中 `/readyz`（ping SQLite，不可达返 503），另提供常驻 `/healthz`（恒 200）；K8s 用同款探针。两路由早已存在（`internal/api/emby/operations.go`），M4 部署改动未新增健康端点语义 |
 
 **升级 / 迁移须知（写进 CHANGELOG Deployment notes）**：
 
