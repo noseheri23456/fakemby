@@ -15,7 +15,7 @@ func RequestLogMiddleware() gin.HandlerFunc {
 		startTime := time.Now()
 		method := c.Request.Method
 		path := c.Request.URL.Path
-		query := c.Request.URL.RawQuery
+		query := "[redacted]"
 
 		// 慢请求探测：handler 挂死时 c.Next() 永不返回，完成日志也不会打；
 		// 用计时器把超过 3s 仍未完成的请求暴露出来（排查客户端转圈的关键盲区）。
@@ -50,6 +50,7 @@ func RequestLogMiddleware() gin.HandlerFunc {
 				"query", query,
 				"status", statusCode,
 				"latency_ms", duration.Milliseconds(),
+				"trace_id", c.GetString("trace_id"),
 			)
 		} else {
 			logger.Info("HTTP Request",
@@ -58,6 +59,7 @@ func RequestLogMiddleware() gin.HandlerFunc {
 				"query", query,
 				"status", statusCode,
 				"latency_ms", duration.Milliseconds(),
+				"trace_id", c.GetString("trace_id"),
 			)
 		}
 	}

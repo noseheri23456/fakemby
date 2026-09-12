@@ -1,22 +1,28 @@
 package service
 
 import (
+	"bytes"
 	"crypto/md5"
 	"fmt"
+	"github.com/disintegration/imaging"
+	"image"
+	"image/jpeg"
 	"io"
-	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/fakemby/fakemby/internal/database"
+	"github.com/fakemby/fakemby/internal/repo"
 	"gorm.io/gorm"
 )
 
 type ImageService struct {
-	db            *gorm.DB
+	repository    repo.Images
 	mode          string // "redirect" or "proxy_cache"
 	cacheDir      string
 	maxCacheBytes int64 // 磁盘配额（字节）；<=0 表示不限
@@ -28,7 +34,7 @@ func NewImageService(db *gorm.DB, mode, cacheDir string, maxCacheMB int) *ImageS
 		maxBytes = int64(maxCacheMB) * 1024 * 1024
 	}
 	return &ImageService{
-		db:            db,
+		repository:    repo.NewImages(db),
 		mode:          mode,
 		cacheDir:      cacheDir,
 		maxCacheBytes: maxBytes,
@@ -37,16 +43,8 @@ func NewImageService(db *gorm.DB, mode, cacheDir string, maxCacheMB int) *ImageS
 
 // GetImage 获取图片（根据模式决定返回 URL 或文件）
 func (s *ImageService) GetImage(itemID string, imageType string, index int, maxWidth, maxHeight int) (string, error) {
-	// 从数据库查询图片
-	var image database.Image
-	query := s.db.Where("item_id = ? AND type = ?", itemID, imageType)
-	if index >= 0 {
-		query = query.Where("idx = ?", index)
-	} else {
-		query = query.Order("idx ASC")
-	}
-
-	if err := query.First(&image).Error; err != nil {
+	image, err := s.repository.Image(itemID, imageType, index)
+	if err != nil {
 		return "", err
 	}
 
@@ -59,57 +57,97 @@ func (s *ImageService) GetImage(itemID string, imageType string, index int, maxW
 }
 
 // getImageFromCache 代理缓存模式：缓存到本地
-func (s *ImageService) getImageFromCache(image database.Image, maxWidth, maxHeight int) (string, error) {
-	// 缓存 key 含尺寸参数（MaxWidth/MaxHeight）：不同尺寸应落不同文件，
-	// 否则客户端请求缩略图却拿到原图（A6）。
-	cachePath := filepath.Join(s.cacheDir, image.ItemID,
-		fmt.Sprintf("%s_%d_%dx%d.jpg", image.Type, image.Idx, maxWidth, maxHeight))
+var imageCacheMu sync.Mutex
+var imageClient = &http.Client{Timeout: 20 * time.Second}
 
-	// 确保目录存在
-	cacheDir := filepath.Dir(cachePath)
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
-		slog.Error("创建缓存目录失败", "error", err)
+func (s *ImageService) getImageFromCache(img database.Image, maxWidth, maxHeight int) (string, error) {
+	if maxWidth < 0 || maxHeight < 0 || maxWidth > 8192 || maxHeight > 8192 {
+		return "", fmt.Errorf("invalid image dimensions")
+	}
+	imageCacheMu.Lock()
+	defer imageCacheMu.Unlock()
+	hash := md5.Sum([]byte(fmt.Sprintf("%s|%s|%d|%s|%dx%d", img.ItemID, img.Type, img.Idx, img.URL, maxWidth, maxHeight)))
+	cachePath := filepath.Join(s.cacheDir, fmt.Sprintf("%x.jpg", hash))
+	if err := os.MkdirAll(s.cacheDir, 0750); err != nil {
 		return "", err
 	}
-
-	// 检查缓存是否存在
-	if _, err := os.Stat(cachePath); err == nil {
-		// 缓存已存在
+	if info, err := os.Stat(cachePath); err == nil && info.Size() > 0 {
+		now := time.Now()
+		_ = os.Chtimes(cachePath, now, now)
 		return cachePath, nil
 	}
-
-	// 下载图片到缓存
-	resp, err := http.Get(image.URL)
+	resp, err := imageClient.Get(img.URL)
 	if err != nil {
-		slog.Error("下载图片失败", "error", err, "url", image.URL)
 		return "", err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	// 创建缓存文件
-	file, err := os.Create(cachePath)
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("image origin status %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 20*1024*1024+1))
 	if err != nil {
-		slog.Error("创建缓存文件失败", "error", err)
 		return "", err
 	}
-	defer func() { _ = file.Close() }()
-
-	// 写入文件
-	if _, err := io.Copy(file, resp.Body); err != nil {
-		slog.Error("写入缓存文件失败", "error", err)
-		_ = os.Remove(cachePath) // 删除不完整的文件
+	if len(data) > 20*1024*1024 {
+		return "", fmt.Errorf("image exceeds 20 MiB")
+	}
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
 		return "", err
 	}
-
-	slog.Debug("图片缓存成功", "path", cachePath)
-
-	// 写入后执行配额淘汰（A6）：超出 image.cache_max_mb 时按 mtime 淘汰最旧文件
+	if cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > 40_000_000 {
+		return "", fmt.Errorf("image dimensions exceed limit")
+	}
+	if maxWidth > 0 || maxHeight > 0 {
+		decoded, _, err := image.Decode(bytes.NewReader(data))
+		if err != nil {
+			return "", err
+		}
+		w, h := maxWidth, maxHeight
+		if w == 0 {
+			w = cfg.Width
+		}
+		if h == 0 {
+			h = cfg.Height
+		}
+		resized := imaging.Fit(decoded, w, h, imaging.Lanczos)
+		var out bytes.Buffer
+		if err := jpeg.Encode(&out, resized, &jpeg.Options{Quality: 85}); err != nil {
+			return "", err
+		}
+		data = out.Bytes()
+	}
+	if s.maxCacheBytes > 0 && int64(len(data)) > s.maxCacheBytes {
+		return "", fmt.Errorf("image exceeds cache quota")
+	}
+	f, err := os.CreateTemp(s.cacheDir, ".image-*")
+	if err != nil {
+		return "", err
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp)
+	if _, err = f.Write(data); err != nil {
+		_ = f.Close()
+		return "", err
+	}
+	if err = f.Sync(); err != nil {
+		_ = f.Close()
+		return "", err
+	}
+	if err = f.Close(); err != nil {
+		return "", err
+	}
+	if err = os.Rename(tmp, cachePath); err != nil {
+		return "", err
+	}
 	if s.maxCacheBytes > 0 {
-		if err := s.enforceQuota(); err != nil {
-			slog.Warn("图片缓存配额淘汰失败", "error", err)
+		if err = s.enforceQuota(); err != nil {
+			return "", err
 		}
 	}
-
+	if _, err = os.Stat(cachePath); err != nil {
+		return "", err
+	}
 	return cachePath, nil
 }
 
@@ -172,41 +210,61 @@ func GenerateImageTag(url string) string {
 }
 
 // GetImages 获取指定类型的所有图片
-func (s *ImageService) GetImages(itemID string, imageType string) ([]database.Image, error) {
-	var images []database.Image
-	if err := s.db.Where("item_id = ? AND type = ?", itemID, imageType).
-		Order("idx ASC").
-		Find(&images).Error; err != nil {
-		return nil, err
-	}
-	return images, nil
+func (s *ImageService) GetImages(itemID, imageType string) ([]database.Image, error) {
+	return s.repository.Images(itemID, imageType)
 }
 
 // GetInheritedImage 获取继承的图片（用于 Episode/Season 继承 Series）
-func (s *ImageService) GetInheritedImage(itemID string, imageType string, mediaService *MediaService) (string, error) {
-	// 首先尝试获取自己的图片
-	imageURL, err := s.GetImage(itemID, imageType, 0, 0, 0)
-	if err == nil && imageURL != "" {
-		return imageURL, nil
+func (s *ImageService) GetInheritedImage(itemID, imageType string, mediaService *MediaService) (string, error) {
+	seen := map[string]bool{}
+	for itemID != "" && !seen[itemID] {
+		seen[itemID] = true
+		if raw, err := s.GetImage(itemID, imageType, 0, 0, 0); err == nil {
+			return raw, nil
+		}
+		item, err := mediaService.GetItemByID(itemID)
+		if err != nil {
+			return "", err
+		}
+		if item.ParentID == nil {
+			break
+		}
+		itemID = *item.ParentID
 	}
-
-	// 如果没有，尝试从父项获取
-	item, err := mediaService.GetItemByID(itemID)
-	if err != nil || item.ParentID == nil {
-		return "", err
-	}
-
-	// 递归获取父项的图片
-	return s.GetInheritedImage(*item.ParentID, imageType, mediaService)
+	return "", gorm.ErrRecordNotFound
 }
 
 // CleanupExpiredCache 清理过期缓存（可选的定期维护任务）
 func (s *ImageService) CleanupExpiredCache(maxAgeDays int) error {
-	if s.mode != "proxy_cache" {
+	if s.mode != "proxy_cache" || maxAgeDays <= 0 {
 		return nil
 	}
+	imageCacheMu.Lock()
+	defer imageCacheMu.Unlock()
+	cutoff := time.Now().AddDate(0, 0, -maxAgeDays)
+	return filepath.WalkDir(s.cacheDir, func(path string, d os.DirEntry, err error) error {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".jpg") {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if info.ModTime().Before(cutoff) {
+			return os.Remove(path)
+		}
+		return nil
+	})
+}
 
-	// TODO: 实现缓存清理逻辑
-	// 可以按修改时间清理超过 maxAgeDays 天的缓存文件
-	return nil
+func NewImageServiceWithRepository(r repo.Images, mode, dir string, maxMB int) *ImageService {
+	s := NewImageService(nil, mode, dir, maxMB)
+	s.repository = r
+	return s
 }

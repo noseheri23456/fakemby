@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,7 +30,6 @@ type Config struct {
 	Image    ImageConfig    `mapstructure:"image"`
 	Playback PlaybackConfig `mapstructure:"playback"`
 	Admin    AdminConfig    `mapstructure:"admin"`
-	TMDb     TMDbConfig     `mapstructure:"tmdb"`
 	Log      LogConfig      `mapstructure:"log"`
 }
 
@@ -45,6 +45,8 @@ type ServerConfig struct {
 }
 
 type DatabaseConfig struct {
+	Dialect      string `mapstructure:"dialect"`
+	DSN          string `mapstructure:"dsn"`
 	Path         string `mapstructure:"path"`
 	WALMode      bool   `mapstructure:"wal_mode"`
 	MaxOpenConns int    `mapstructure:"max_open_conns"` // 读连接池大小（A2）；<=0 回落单连接
@@ -65,10 +67,14 @@ type ImageConfig struct {
 }
 
 type PlaybackConfig struct {
-	Redirect      bool   `mapstructure:"redirect"`
-	SignKey       string `mapstructure:"sign_key"`
-	SignTTL       int    `mapstructure:"sign_ttl"`
-	FlushInterval int    `mapstructure:"flush_interval"` // 进度缓冲 flush 间隔（秒）；A7
+	RedirectMode  string   `mapstructure:"redirect_mode"`
+	BindIP        bool     `mapstructure:"bind_ip"`
+	PlainPrefixes []string `mapstructure:"plain_prefixes"`
+	STRMRoot      string   `mapstructure:"strm_root"`
+	Redirect      bool     `mapstructure:"redirect"`
+	SignKey       string   `mapstructure:"sign_key"`
+	SignTTL       int      `mapstructure:"sign_ttl"`
+	FlushInterval int      `mapstructure:"flush_interval"` // 进度缓冲 flush 间隔（秒）；A7
 	// SignPrefixes 只对 URL 命中这些前缀的播放源追加签名参数。
 	// 对不配合校验的第三方 CDN 追加我方签名没有意义（M0-7 的设计边界）。
 	SignPrefixes []string `mapstructure:"sign_prefixes"`
@@ -76,12 +82,6 @@ type PlaybackConfig struct {
 
 type AdminConfig struct {
 	APIKey string `mapstructure:"api_key"`
-}
-
-type TMDbConfig struct {
-	APIKey    string `mapstructure:"api_key"`
-	Language  string `mapstructure:"language"`
-	ImageBase string `mapstructure:"image_base"`
 }
 
 type LogConfig struct {
@@ -156,6 +156,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.id", "fakemby-xxxxx")
 	v.SetDefault("server.cors_origins", []string{})
 
+	v.SetDefault("database.dialect", "sqlite")
+	v.SetDefault("database.dsn", "")
 	v.SetDefault("database.path", "./fakemby.db")
 	v.SetDefault("database.wal_mode", true)
 	v.SetDefault("database.max_open_conns", 10)
@@ -170,6 +172,10 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("image.cache_max_mb", 0)
 	v.SetDefault("image.cdn_prefix", "")
 
+	v.SetDefault("playback.redirect_mode", "signed")
+	v.SetDefault("playback.bind_ip", false)
+	v.SetDefault("playback.plain_prefixes", []string{})
+	v.SetDefault("playback.strm_root", "")
 	v.SetDefault("playback.redirect", true)
 	v.SetDefault("playback.sign_key", "")
 	v.SetDefault("playback.sign_ttl", 3600)
@@ -177,10 +183,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("playback.sign_prefixes", []string{})
 
 	v.SetDefault("admin.api_key", "")
-
-	v.SetDefault("tmdb.api_key", "")
-	v.SetDefault("tmdb.language", "zh-CN")
-	v.SetDefault("tmdb.image_base", "https://image.tmdb.org/t/p/original")
 
 	v.SetDefault("log.level", "info")
 	v.SetDefault("log.file", "")
@@ -192,12 +194,11 @@ func setDefaults(v *viper.Viper) {
 func bindEnvKeys(v *viper.Viper) {
 	keys := []string{
 		"server.host", "server.port", "server.name", "server.version", "server.id", "server.cors_origins",
-		"database.path", "database.wal_mode", "database.max_open_conns", "database.max_idle_conns",
+		"database.dialect", "database.dsn", "database.path", "database.wal_mode", "database.max_open_conns", "database.max_idle_conns",
 		"auth.token_expiry_days", "auth.login_max_attempts", "auth.login_lock_minutes",
 		"image.mode", "image.cache_dir", "image.cache_max_mb", "image.cdn_prefix",
-		"playback.redirect", "playback.sign_key", "playback.sign_ttl", "playback.flush_interval", "playback.sign_prefixes",
+		"playback.redirect_mode", "playback.bind_ip", "playback.plain_prefixes", "playback.strm_root", "playback.redirect", "playback.sign_key", "playback.sign_ttl", "playback.flush_interval", "playback.sign_prefixes",
 		"admin.api_key",
-		"tmdb.api_key", "tmdb.language", "tmdb.image_base",
 		"log.level", "log.file",
 	}
 	for _, k := range keys {
@@ -292,18 +293,31 @@ func (c *Config) EnsureSignKey() {
 // ShouldSign 判断某个源 URL 是否需要追加签名参数。
 // sign_prefixes 为空表示对所有源签名（便于自建反代场景）。
 func (c *Config) ShouldSign(rawURL string) bool {
-	if c == nil || rawURL == "" {
+	if c == nil || rawURL == "" || c.Playback.RedirectMode == "plain" {
 		return false
 	}
-	if len(c.Playback.SignPrefixes) == 0 {
-		return true
+	for _, p := range c.Playback.PlainPrefixes {
+		if URLPrefixMatches(rawURL, p) {
+			return false
+		}
 	}
 	for _, p := range c.Playback.SignPrefixes {
-		if p != "" && strings.HasPrefix(rawURL, p) {
+		if URLPrefixMatches(rawURL, p) {
 			return true
 		}
 	}
 	return false
+}
+
+// URLPrefixMatches compares URL origins and path boundaries, not host prefixes.
+func URLPrefixMatches(raw, prefix string) bool {
+	u, e := url.Parse(raw)
+	p, pe := url.Parse(prefix)
+	if e != nil || pe != nil || p.Host == "" || u.User != nil || p.User != nil || !strings.EqualFold(u.Scheme, p.Scheme) || !strings.EqualFold(u.Host, p.Host) {
+		return false
+	}
+	path := strings.TrimSuffix(p.Path, "/")
+	return path == "" || u.Path == path || strings.HasPrefix(u.Path, path+"/")
 }
 
 // PrepareRuntime 启动时一次性准备：生成/校验密钥、创建日志与缓存目录并输出安全告警

@@ -2,25 +2,22 @@ package service
 
 import (
 	"github.com/fakemby/fakemby/internal/database"
+	"github.com/fakemby/fakemby/internal/repo"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 type PlaybackService struct {
-	db *gorm.DB
+	repository repo.Playback
 }
 
 func NewPlaybackService(db *gorm.DB) *PlaybackService {
-	return &PlaybackService{db: db}
+	return NewPlaybackServiceWithRepository(repo.NewPlayback(db))
 }
 
 // GetMediaSources 获取媒体项的所有播放源
 func (s *PlaybackService) GetMediaSources(itemID string) ([]database.MediaSource, error) {
-	var sources []database.MediaSource
-	if err := s.db.Where("item_id = ?", itemID).Order("sort_order").Find(&sources).Error; err != nil {
-		return nil, err
-	}
-	return sources, nil
+	return s.repository.GetMediaSources(itemID)
 }
 
 // MediaStreamBaseIndex 返回字幕流在 MediaStreams 数组中的起始全局下标。
@@ -49,80 +46,29 @@ func (s *PlaybackService) GeneratePlaySession(userID, itemID string) string {
 
 // UpdatePlayProgress 更新播放进度（去抖缓冲版本）
 func (s *PlaybackService) UpdatePlayProgress(userID, itemID string, positionTicks int64) error {
-	// 这个方法会由进度缓冲系统调用
-	// 直接更新数据库
-	var progress database.PlayProgress
-	if err := s.db.Where("user_id = ? AND item_id = ?", userID, itemID).First(&progress).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			// 创建新的进度记录
-			progress = database.PlayProgress{
-				UserID:        userID,
-				ItemID:        itemID,
-				PositionTicks: positionTicks,
-			}
-			return s.db.Create(&progress).Error
-		}
-		return err
-	}
-
-	// 更新现有进度
-	return s.db.Model(&progress).Update("position_ticks", positionTicks).Error
+	return s.repository.UpdatePlayProgress(userID, itemID, positionTicks)
 }
 
 // MarkAsPlayed 标记为已看
 func (s *PlaybackService) MarkAsPlayed(userID, itemID string) error {
-	var progress database.PlayProgress
-	if err := s.db.Where("user_id = ? AND item_id = ?", userID, itemID).First(&progress).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			// 创建新的进度记录
-			progress = database.PlayProgress{
-				UserID:    userID,
-				ItemID:    itemID,
-				IsPlayed:  true,
-				PlayCount: 1,
-			}
-			return s.db.Create(&progress).Error
-		}
-		return err
-	}
-
-	// 更新现有记录
-	return s.db.Model(&progress).
-		Update("is_played", true).
-		Update("play_count", gorm.Expr("play_count + ?", 1)).
-		Error
+	return s.repository.MarkAsPlayed(userID, itemID)
 }
 
 // UnmarkAsPlayed 取消已看标记。
 // 没有可更新的记录（用户本来就没标记过）不算错误。
 func (s *PlaybackService) UnmarkAsPlayed(userID, itemID string) error {
-	return s.toggleFlag(userID, itemID, "is_played", false)
+	return s.repository.UnmarkAsPlayed(userID, itemID)
 }
 
 // MarkAsFavorite 标记为收藏
 func (s *PlaybackService) MarkAsFavorite(userID, itemID string) error {
-	var progress database.PlayProgress
-	if err := s.db.Where("user_id = ? AND item_id = ?", userID, itemID).First(&progress).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			// 创建新的进度记录
-			progress = database.PlayProgress{
-				UserID:     userID,
-				ItemID:     itemID,
-				IsFavorite: true,
-			}
-			return s.db.Create(&progress).Error
-		}
-		return err
-	}
-
-	// 更新现有记录
-	return s.db.Model(&progress).Update("is_favorite", true).Error
+	return s.repository.MarkAsFavorite(userID, itemID)
 }
 
 // UnmarkAsFavorite 取消收藏。
 // 没有可更新的记录（用户本来就没收藏）不算错误。
 func (s *PlaybackService) UnmarkAsFavorite(userID, itemID string) error {
-	return s.toggleFlag(userID, itemID, "is_favorite", false)
+	return s.repository.UnmarkAsFavorite(userID, itemID)
 }
 
 // toggleFlag 把 user_id+item_id 定位到的进度记录上的布尔字段置为指定值。
@@ -130,46 +76,17 @@ func (s *PlaybackService) UnmarkAsFavorite(userID, itemID string) error {
 // 踩过的坑：直接 s.db.Where(...).Update(...) 而不指定 Model，gorm 拼出的 UPDATE
 // 语句没有表名，执行必然报错；旧代码又把"RowsAffected == 0"当成成功吞掉，
 // 导致"取消已看 / 取消收藏"静默失效——用户点了没反应，服务端还返回 200。
-func (s *PlaybackService) toggleFlag(userID, itemID, column string, value bool) error {
-	result := s.db.Model(&database.PlayProgress{}).
-		Where("user_id = ? AND item_id = ?", userID, itemID).
-		Update(column, value)
-	if result.Error != nil {
-		if result.RowsAffected == 0 {
-			return nil
-		}
-		return result.Error
-	}
-	return nil
-}
 
 // GetPlayProgress 获取播放进度
 func (s *PlaybackService) GetPlayProgress(userID, itemID string) (*database.PlayProgress, error) {
-	var progress database.PlayProgress
-	if err := s.db.Where("user_id = ? AND item_id = ?", userID, itemID).First(&progress).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return &progress, nil
+	return s.repository.GetPlayProgress(userID, itemID)
 }
 
 // GetResumeItems 获取继续观看列表
 func (s *PlaybackService) GetResumeItems(userID string, limit int) ([]database.MediaItem, error) {
-	var items []database.MediaItem
+	return s.repository.GetResumeItems(userID, limit)
+}
 
-	// 查询播放进度大于 0 且未标记已看的项目
-	err := s.db.
-		Joins("JOIN play_progress ON play_progress.item_id = media_items.id").
-		Where("play_progress.user_id = ? AND play_progress.position_ticks > 0 AND play_progress.is_played = 0", userID).
-		Order("play_progress.last_played DESC").
-		Limit(limit).
-		Find(&items).Error
-
-	if err != nil {
-		return nil, err
-	}
-
-	return items, nil
+func NewPlaybackServiceWithRepository(r repo.Playback) *PlaybackService {
+	return &PlaybackService{repository: r}
 }

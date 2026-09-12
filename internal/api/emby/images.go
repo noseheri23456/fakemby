@@ -17,8 +17,8 @@ func RegisterImageRoutes(router *gin.Engine, cfg *config.Config) {
 	mediaSvc := service.NewMediaService(database.Get())
 
 	// 媒体项图片
-	router.GET("/emby/Items/:itemId/Images/:imageType", getItemImage(imgSvc, mediaSvc, cfg))
-	router.GET("/emby/Items/:itemId/Images/:imageType/:index", getItemImageByIndex(imgSvc, mediaSvc, cfg))
+	router.GET("/emby/Items/:itemId/Images/:imageType", AuthTokenMiddleware(cfg.TokenExpiryDays()), getItemImage(imgSvc, mediaSvc, cfg))
+	router.GET("/emby/Items/:itemId/Images/:imageType/:index", AuthTokenMiddleware(cfg.TokenExpiryDays()), getItemImageByIndex(imgSvc, mediaSvc, cfg))
 
 	// 用户头像
 	router.GET("/emby/Users/:userId/Images/:imageType", getUserImage(imgSvc, cfg))

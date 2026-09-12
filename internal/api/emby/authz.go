@@ -99,3 +99,6 @@ func RequireUserMatch(param string) gin.HandlerFunc {
 		c.Abort()
 	}
 }
+
+// RequireAdminAPIKey is shared by management route registrars.
+func RequireAdminAPIKey() gin.HandlerFunc { return adminAuth() }

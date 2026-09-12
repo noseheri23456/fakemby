@@ -18,6 +18,12 @@
   "IndexNumber": 1,
   "SeriesId": "item-series",
   "SeriesName": "西部世界",
+  "GenreItems": [],
+  "Genres": [],
+  "Studios": [],
+  "Tags": [],
+  "Taglines": [],
+  "People": [],
   "ImageTags": {
     "Primary": "ww123456"
   },
@@ -26,6 +32,7 @@
   ],
   "PrimaryImageAspectRatio": 1.7777777777777777,
   "ParentBackdropItemId": "item-series",
+  "ParentBackdropImageTags": [],
   "UserData": {
     "PlaybackPositionTicks": 27900000000,
     "PlayCount": 0,
@@ -59,12 +66,14 @@
       "SupportsProbing": true,
       "MediaStreams": [],
       "ReadAtNativeFramerate": false,
+      "Formats": [],
       "RequiredHttpHeaders": {},
       "DirectStreamUrl": "/emby/Videos/\u003cid\u003e/stream?Static=true\u0026mediaSourceId=\u003csrc\u003e"
     }
   ],
   "ProviderIds": {},
   "RemoteTrailers": [],
+  "Subviews": [],
   "DateCreated": "2024-01-01T00:00:00Z",
   "DateModified": "2024-01-01T00:00:00Z",
   "PresentationUniqueKey": "item-episode",

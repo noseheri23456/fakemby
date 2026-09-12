@@ -40,12 +40,12 @@ type BaseItemDto struct {
 	SeasonCount *int `json:"SeasonCount,omitempty"`
 
 	CollectionType string       `json:"CollectionType,omitempty"`
-	GenreItems     []NameIdPair `json:"GenreItems,omitempty"`
-	Genres         []string     `json:"Genres,omitempty"`
-	Studios        []NameIdPair `json:"Studios,omitempty"`
-	Tags           []string     `json:"Tags,omitempty"`
-	Taglines       []string     `json:"Taglines,omitempty"`
-	People         []PersonInfo `json:"People,omitempty"`
+	GenreItems     []NameIdPair `json:"GenreItems"`
+	Genres         []string     `json:"Genres"`
+	Studios        []NameIdPair `json:"Studios"`
+	Tags           []string     `json:"Tags"`
+	Taglines       []string     `json:"Taglines"`
+	People         []PersonInfo `json:"People"`
 
 	ImageTags               map[string]string `json:"ImageTags"`
 	BackdropImageTags       []string          `json:"BackdropImageTags"`
@@ -54,7 +54,7 @@ type BaseItemDto struct {
 	ParentLogoItemID        string   `json:"ParentLogoItemId,omitempty"`
 	ParentLogoImageTag      string   `json:"ParentLogoImageTag,omitempty"`
 	ParentBackdropItemID    string   `json:"ParentBackdropItemId,omitempty"`
-	ParentBackdropImageTags []string `json:"ParentBackdropImageTags,omitempty"`
+	ParentBackdropImageTags []string `json:"ParentBackdropImageTags"`
 	ParentThumbItemID       string   `json:"ParentThumbItemId,omitempty"`
 	ParentThumbImageTag     string   `json:"ParentThumbImageTag,omitempty"`
 
@@ -62,7 +62,7 @@ type BaseItemDto struct {
 	MediaSources   []MediaSourceDto  `json:"MediaSources"`
 	ProviderIds    map[string]string `json:"ProviderIds"`
 	RemoteTrailers []ExternalUrl     `json:"RemoteTrailers"`
-	Subviews       []string          `json:"Subviews,omitempty"`
+	Subviews       []string          `json:"Subviews"`
 
 	DateCreated           string        `json:"DateCreated,omitempty"`
 	DateModified          string        `json:"DateModified,omitempty"`
@@ -111,7 +111,7 @@ type MediaSourceDto struct {
 	DefaultAudioStreamIndex    *int             `json:"DefaultAudioStreamIndex,omitempty"`
 	DefaultSubtitleStreamIndex *int             `json:"DefaultSubtitleStreamIndex,omitempty"`
 	ReadAtNativeFramerate      bool             `json:"ReadAtNativeFramerate"`
-	Formats                    []string         `json:"Formats,omitempty"`
+	Formats                    []string         `json:"Formats"`
 	// RequiredHttpHeaders 不带 omitempty：官方客户端 supportsDirectPlay() 裸调
 	// mediaSource.RequiredHttpHeaders.length，字段缺失（undefined）会 TypeError
 	// 炸断详情页 Promise 链。空 map 序列化为 {}，与官方服务器一致。
@@ -195,7 +195,7 @@ type NameIdPair struct {
 type ItemsResponse struct {
 	Items            []BaseItemDto `json:"Items"`
 	TotalRecordCount int           `json:"TotalRecordCount"`
-	StartIndex       int           `json:"StartIndex,omitempty"`
+	StartIndex       int           `json:"StartIndex"`
 }
 
 // ViewsResponse 媒体库视图响应

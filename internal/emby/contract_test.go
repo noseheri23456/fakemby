@@ -357,8 +357,12 @@ func TestLoginForcePasswordChange(t *testing.T) {
 
 	r := a.post("/emby/Users/AuthenticateByName", "",
 		[]byte(`{"Username":"forceuser","Pw":"old-pass"}`))
-	require.Equal(t, http.StatusOK, r.Status)
-	assert.Equal(t, true, r.JSON(t)["ForcePasswordChange"], "应提示客户端强制改密")
+	require.Equal(t, http.StatusForbidden, r.Status)
+	assert.Equal(t, true, r.JSON(t)["ForcePasswordChange"], "必须改密账户不得获得登录会话")
+	assert.NotContains(t, r.JSON(t), "AccessToken")
+	var count int64
+	require.NoError(t, env.DB.Model(&database.Token{}).Where("user_id = ?", "user-force").Count(&count).Error)
+	assert.Zero(t, count)
 
 	// 改密后标记清除，再次登录不再强制
 	cp := a.do(http.MethodPost, "/api/admin/users/user-force/password",
@@ -496,7 +500,7 @@ func TestProxyCacheImageServedByServer(t *testing.T) {
 	ts := testutil.NewTestServer(t, env.Cfg)
 
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("fake-jpeg-bytes"))
+		_, _ = w.Write(testutil.ImageBytes())
 	}))
 	t.Cleanup(origin.Close)
 
@@ -505,7 +509,10 @@ func TestProxyCacheImageServedByServer(t *testing.T) {
 		Where("item_id = ? AND type = ?", testutil.MovieID, "Backdrop").
 		Update("url", origin.URL+"/fanart.jpg").Error)
 
-	res, err := http.Get(ts.URL + "/emby/Items/" + testutil.MovieID + "/Images/Backdrop/0?maxWidth=1400&quality=70")
+	request, err := http.NewRequest(http.MethodGet, ts.URL+"/emby/Items/"+testutil.MovieID+"/Images/Backdrop/0", nil)
+	require.NoError(t, err)
+	request.Header.Set("X-Emby-Token", testutil.NormalToken)
+	res, err := http.DefaultClient.Do(request)
 	require.NoError(t, err)
 	defer func() { _ = res.Body.Close() }()
 	body, err := io.ReadAll(res.Body)
@@ -513,7 +520,7 @@ func TestProxyCacheImageServedByServer(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, res.StatusCode,
 		"proxy_cache 应由服务器直接出图而非 302/500，body=%s", string(body))
-	assert.Equal(t, "fake-jpeg-bytes", string(body), "应返回源站图片内容")
+	assert.Equal(t, string(testutil.ImageBytes()), string(body), "应返回源站图片内容")
 }
 
 // 官方客户端（Emby Theater/Web）渲染首页 latestmedia 板块时会裸调用

@@ -47,11 +47,20 @@ type Payload struct {
 	UserID     string
 	MediaType  string // video | subtitle
 	ExtraIndex string // 字幕下标等可选维度，视频场景留空
+	IP         string // Optional client address binding, signed as a separate dimension.
 }
 
 // String 序列化为待签名字符串
 func (p Payload) String() string {
-	return strings.Join([]string{p.MediaType, p.ItemID, p.SourceID, p.UserID, p.ExtraIndex}, "|")
+	parts := []string{p.MediaType, p.ItemID, p.SourceID, p.UserID, p.ExtraIndex}
+	for i, v := range parts {
+		parts[i] = strings.ReplaceAll(strings.ReplaceAll(v, "%", "%25"), "|", "%7C")
+	}
+	raw := strings.Join(parts, "|")
+	if p.IP != "" {
+		raw += "|ip=" + p.IP
+	}
+	return raw
 }
 
 // Sign 返回过期时间戳与签名（hex）

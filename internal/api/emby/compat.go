@@ -13,6 +13,7 @@ import (
 // 返回空集合；缺失（404）会导致部分官方客户端初始化流程中断（主页转圈/白屏）。
 // 实测轨迹（Emby Theater 3.0.20）见各 handler 注释。
 func RegisterCompatRoutes(router *gin.Engine, cfg *config.Config) {
+	registerExtraCompat(router, cfg)
 	auth := AuthTokenMiddleware(cfg.Auth.TokenExpiryDays)
 
 	// GET /emby/System/Configuration 404 后，Theater 会 fallback 到 public 版
@@ -74,7 +75,7 @@ func emptyItemsHandler() gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{
 			"Items":            []interface{}{},
 			"TotalRecordCount": 0,
-			"StartDateIndex":   0,
+			"StartIndex":       0,
 			"UpdateDate":       time.Now().UTC().Format("2006-01-02T15:04:05.0000000Z"),
 		})
 	}

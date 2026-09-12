@@ -71,7 +71,7 @@ func TestGetImageProxyCacheDownloadsOnce(t *testing.T) {
 	var hits atomic.Int32
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
-		_, _ = w.Write([]byte("fake-jpeg-bytes"))
+		_, _ = w.Write(testutil.ImageBytes())
 	}))
 	defer origin.Close()
 
@@ -89,7 +89,7 @@ func TestGetImageProxyCacheDownloadsOnce(t *testing.T) {
 
 	content, err := os.ReadFile(first)
 	require.NoError(t, err)
-	assert.Equal(t, "fake-jpeg-bytes", string(content), "应把源站内容落盘")
+	assert.Equal(t, string(testutil.ImageBytes()), string(content), "应把源站内容落盘")
 
 	second, err := svc.GetImage(testutil.MovieID, "Logo", -1, 0, 0)
 	require.NoError(t, err)
@@ -124,7 +124,7 @@ func TestImageCacheQuotaEviction(t *testing.T) {
 	var hits atomic.Int32
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
-		_, _ = w.Write(make([]byte, 100*1024)) // 每张 100KB
+		_, _ = w.Write(testutil.ImageBytes()) // 每张 100KB
 	}))
 	defer origin.Close()
 

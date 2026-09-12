@@ -5,9 +5,10 @@ import (
 	"testing"
 	"time"
 
+	adminapi "github.com/fakemby/fakemby/internal/api/admin"
+	"github.com/fakemby/fakemby/internal/api/emby"
 	"github.com/fakemby/fakemby/internal/config"
 	"github.com/fakemby/fakemby/internal/database"
-	"github.com/fakemby/fakemby/internal/emby"
 	"github.com/gin-gonic/gin"
 )
 
@@ -52,7 +53,6 @@ func TestConfig(t *testing.T) *config.Config {
 			SignPrefixes: []string{"https://openlist.example.com"},
 		},
 		Admin: config.AdminConfig{APIKey: TestAdminAPIKey},
-		TMDb:  config.TMDbConfig{Language: "zh-CN", ImageBase: "https://image.tmdb.org/t/p/original"},
 		Log:   config.LogConfig{Level: "error", File: ""},
 	}
 
@@ -76,6 +76,8 @@ func NewRouter(t *testing.T, cfg *config.Config) *gin.Engine {
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
+	_ = router.SetTrustedProxies(nil)
+	router.Use(emby.OperationsMiddleware())
 	router.Use(emby.CORSMiddleware(cfg))
 	router.Use(emby.RequestLogMiddleware())
 	router.Use(emby.ErrorHandlerMiddleware())
@@ -86,15 +88,17 @@ func NewRouter(t *testing.T, cfg *config.Config) *gin.Engine {
 	emby.RegisterUserDataRoutes(router, cfg)
 	emby.RegisterItemRoutes(router, cfg)
 	emby.RegisterShowRoutes(router, cfg)
-	emby.RegisterAdminItemRoutes(router)
-	emby.RegisterImportRoutes(router)
-	emby.RegisterAdminUserRoutes(router)
+	adminapi.RegisterAdminItemRoutes(router)
+	adminapi.RegisterImportRoutes(router)
+	adminapi.RegisterAdminUserRoutes(router)
 	emby.RegisterPlaybackRoutes(router, cfg)
 	emby.RegisterSessionRoutes(router, cfg)
 	emby.RegisterImageRoutes(router, cfg)
 	emby.RegisterSearchRoutes(router, cfg)
 	emby.RegisterStatsRoutes(router, cfg)
 	emby.RegisterCompatRoutes(router, cfg)
+	emby.RegisterWebSocketRoutes(router, cfg)
+	emby.RegisterOperations(router)
 
 	return router
 }

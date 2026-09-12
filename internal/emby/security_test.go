@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -190,7 +189,11 @@ func TestS3SignedLinkVerifyRoundTrip(t *testing.T) {
 	assert.Equal(t, http.StatusOK, verify(nil), "有效签名应通过")
 
 	assert.Equal(t, http.StatusUnauthorized, verify(func(v url.Values) {
-		v.Set("sig", strings.Replace(sig, "a", "b", 1))
+		if sig[0] == 'a' {
+			v.Set("sig", "b"+sig[1:])
+		} else {
+			v.Set("sig", "a"+sig[1:])
+		}
 	}), "篡改签名应拒绝")
 
 	assert.Equal(t, http.StatusUnauthorized, verify(func(v url.Values) {
@@ -220,7 +223,11 @@ func TestS3ExternalPlayerCanStreamWithSignatureOnly(t *testing.T) {
 
 	ok := a.get(parsed.RequestURI(), "") // 不带 X-Emby-Token
 	require.Equal(t, http.StatusFound, ok.Status)
-	assert.Equal(t, testutil.EpisodeSrcURL, ok.Header.Get("Location"))
+	redirect, err := url.Parse(ok.Header.Get("Location"))
+	require.NoError(t, err)
+	assert.Equal(t, testutil.EpisodeSrcURL, redirect.Scheme+"://"+redirect.Host+redirect.Path)
+	require.NotEmpty(t, redirect.Query().Get("sig"))
+	assert.Equal(t, http.StatusOK, a.get("/api/auth/verify?"+redirect.RawQuery, "").Status)
 
 	// 篡改签名后不带 token 播放 → 必须被挡
 	q := parsed.Query()

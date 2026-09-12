@@ -29,6 +29,7 @@ func RegisterShowRoutes(router *gin.Engine, cfg *config.Config) {
 
 func getSeasons(mediaSvc *service.MediaService) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		mediaSvc := scopedMediaService(c)
 		userID := c.GetString("user_id")
 		seriesID := c.Param("seriesId")
 		fieldsStr := c.Query("Fields")
@@ -66,6 +67,7 @@ func getSeasons(mediaSvc *service.MediaService) gin.HandlerFunc {
 
 func getEpisodes(mediaSvc *service.MediaService) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		mediaSvc := scopedMediaService(c)
 		userID := c.GetString("user_id")
 		seriesID := c.Param("seriesId")
 		seasonID := c.Query("SeasonId")

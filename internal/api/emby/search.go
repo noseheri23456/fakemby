@@ -52,7 +52,7 @@ func searchHints() gin.HandlerFunc {
 			}
 		}
 
-		db := database.Get()
+		db := scopedMediaDB(c)
 		searchSvc := service.NewSearchService(db)
 
 		// 执行搜索
@@ -128,7 +128,7 @@ func getSimilarItems() gin.HandlerFunc {
 		itemID := c.Param("itemId")
 		limit, _ := strconv.Atoi(c.DefaultQuery("Limit", "20"))
 
-		db := database.Get()
+		db := scopedMediaDB(c)
 		mediaSvc := service.NewMediaService(db)
 		searchSvc := service.NewSearchService(db)
 

@@ -3,6 +3,7 @@ package database
 import (
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -49,9 +50,21 @@ func Init(dbPath string, walMode bool, maxOpenConns, maxIdleConns int) (*gorm.DB
 
 // openHandle 打开一个独立的连接池句柄。每个 *gorm.DB 维护自己的连接池，
 // 读/写分开后，读并发不再被写连接的 MaxOpenConns(1) 卡住（A2）。
+func sqliteDSN(path string, wal bool) string {
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	path += sep + "_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
+	if wal {
+		path += "&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)"
+	}
+	return path
+}
+
 func openHandle(dbPath string, walMode bool, maxOpen, maxIdle int) (*gorm.DB, error) {
 	// 使用 glebarez/sqlite 驱动（纯 Go，不需要 CGO）
-	database, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{
+	database, err := gorm.Open(sqlite.Open(sqliteDSN(dbPath, walMode)), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
@@ -151,7 +164,7 @@ func createDefaultAdmin(d *gorm.DB) error {
 		return fmt.Errorf("创建默认管理员失败: %w", err)
 	}
 
-	slog.Info("✓ 默认管理员创建成功", "username", "admin", "password", "admin")
+	slog.Info("Default administrator created; password reset required", "username", "admin")
 	slog.Warn("⚠️ 警告: 生产环境中请立即更改默认密码!")
 	return nil
 }
@@ -185,6 +198,7 @@ func GetWrite() *gorm.DB {
 // 仅供测试使用——正式启动必须走 Init（它还会建索引、建默认管理员）。
 func Set(d *gorm.DB) {
 	db = d
+	writeDB = d
 }
 
 func Close() error {
@@ -195,7 +209,16 @@ func Close() error {
 	if err != nil {
 		return err
 	}
-	return sqlDB.Close()
+	err = sqlDB.Close()
+	if writeDB != nil && writeDB != db {
+		if w, e := writeDB.DB(); e == nil {
+			if e = w.Close(); err == nil {
+				err = e
+			}
+		}
+	}
+	db, writeDB = nil, nil
+	return err
 }
 
 // StartTokenCleanupRoutine 启动令牌过期清理 goroutine

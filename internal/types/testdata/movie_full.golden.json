@@ -44,6 +44,8 @@
   "Tags": [
     "科幻"
   ],
+  "Taglines": [],
+  "People": [],
   "ImageTags": {
     "Primary": "abcd1234"
   },
@@ -51,6 +53,7 @@
     "bg000001"
   ],
   "PrimaryImageAspectRatio": 0.6666666666666666,
+  "ParentBackdropImageTags": [],
   "UserData": {
     "PlaybackPositionTicks": 55800000000,
     "PlayCount": 1,
@@ -84,6 +87,7 @@
       "SupportsProbing": true,
       "MediaStreams": [],
       "ReadAtNativeFramerate": false,
+      "Formats": [],
       "RequiredHttpHeaders": {},
       "DirectStreamUrl": "/emby/Videos/\u003cid\u003e/stream?Static=true\u0026mediaSourceId=\u003csrc\u003e"
     }
@@ -92,6 +96,7 @@
     "Tmdb": "438631"
   },
   "RemoteTrailers": [],
+  "Subviews": [],
   "DateCreated": "2024-01-01T00:00:00Z",
   "DateModified": "2024-01-01T00:00:00Z",
   "PresentationUniqueKey": "item-movie",

@@ -1,100 +1,119 @@
 package service
 
 import (
-	"encoding/json"
+	"github.com/mozillazg/go-pinyin"
+	"html"
+	"sort"
 	"strings"
 
 	"github.com/fakemby/fakemby/internal/database"
+	"github.com/fakemby/fakemby/internal/repo"
 	"gorm.io/gorm"
 )
 
 type SearchService struct {
-	db *gorm.DB
+	repository repo.Search
 }
 
 func NewSearchService(db *gorm.DB) *SearchService {
-	return &SearchService{db: db}
+	return NewSearchServiceWithRepository(repo.NewSearch(db))
 }
 
 // SearchItems 全文搜索媒体项目
-func (s *SearchService) SearchItems(searchTerm string, includeTypes []string, startIndex, limit int) ([]database.MediaItem, int64, error) {
-	var items []database.MediaItem
-	var total int64
-
-	query := s.db
-
-	// 在 name 和 overview 中模糊查询
-	searchPattern := "%" + searchTerm + "%"
-	query = query.Where("name LIKE ? OR overview LIKE ?", searchPattern, searchPattern)
-
-	// 项目类型过滤
-	if len(includeTypes) > 0 {
-		query = query.Where("type IN ?", includeTypes)
-	}
-
-	// 计数
-	query.Model(&database.MediaItem{}).Count(&total)
-
-	// 分页
-	query = query.Offset(startIndex)
-	if limit > 0 {
-		query = query.Limit(limit)
-	}
-	query = query.Order("name asc")
-
-	if err := query.Find(&items).Error; err != nil {
+func (s *SearchService) SearchItems(term string, kinds []string, start, limit int) ([]database.MediaItem, int64, error) {
+	rows, err := s.repository.Candidates(kinds)
+	if err != nil {
 		return nil, 0, err
 	}
+	type hit struct {
+		item  database.MediaItem
+		score int
+	}
+	hits := []hit{}
+	needle := strings.ToLower(strings.TrimSpace(term))
+	compact := strings.ReplaceAll(needle, " ", "")
+	for _, item := range rows {
+		score := 0
+		name := strings.ToLower(item.Name)
+		switch {
+		case name == needle:
+			score = 100
+		case strings.HasPrefix(name, needle):
+			score = 80
+		case strings.Contains(name, needle):
+			score = 60
+		case strings.Contains(strings.ToLower(item.OriginalTitle+" "+item.Tags), needle):
+			score = 50
+		case strings.Contains(strings.ToLower(item.Overview), needle):
+			score = 10
+		}
+		syllables := pinyin.LazyPinyin(item.Name, pinyin.NewArgs())
+		initials := ""
+		for _, p := range syllables {
+			if len(p) > 0 {
+				initials += p[:1]
+			}
+		}
+		if compact != "" && (strings.Contains(strings.Join(syllables, ""), compact) || strings.Contains(initials, compact)) {
+			score = max(score, 40)
+		}
+		if score > 0 {
+			switch item.Type {
+			case "Movie", "Series":
+				score += 5
+			case "Episode":
+				score += 2
+			}
+			hits = append(hits, hit{item, score})
+		}
+	}
+	sort.SliceStable(hits, func(i, j int) bool {
+		if hits[i].score != hits[j].score {
+			return hits[i].score > hits[j].score
+		}
+		if hits[i].item.Name != hits[j].item.Name {
+			return hits[i].item.Name < hits[j].item.Name
+		}
+		return hits[i].item.ID < hits[j].item.ID
+	})
+	total := len(hits)
+	if start < 0 {
+		start = 0
+	}
+	if start > total {
+		start = total
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	end := min(start+limit, total)
+	items := []database.MediaItem{}
+	for _, h := range hits[start:end] {
+		items = append(items, h.item)
+	}
+	return items, int64(total), nil
+}
 
-	return items, total, nil
+// HighlightName returns escaped markup; unmatched aliases return plain escaped text.
+func HighlightName(name, term string) string {
+	if term == "" {
+		return html.EscapeString(name)
+	}
+	i := strings.Index(strings.ToLower(name), strings.ToLower(term))
+	if i < 0 {
+		return html.EscapeString(name)
+	}
+	end := min(i+len(term), len(name))
+	return html.EscapeString(name[:i]) + "<mark>" + html.EscapeString(name[i:end]) + "</mark>" + html.EscapeString(name[end:])
 }
 
 // FindSimilarItems 查找相似项目（按流派、年份、类型）
-func (s *SearchService) FindSimilarItems(itemID string, limit int) ([]database.MediaItem, error) {
-	// 获取原项目
-	var sourceItem database.MediaItem
-	if err := s.db.Where("id = ?", itemID).First(&sourceItem).Error; err != nil {
-		return nil, err
-	}
-
-	var items []database.MediaItem
-
-	// 查询同类型的项目
-	query := s.db.Where("type = ?", sourceItem.Type).Where("id != ?", itemID)
-
-	// 如果原项目有流派，优先匹配相同流派的项目
-	if sourceItem.Genres != "" {
-		var genres []string
-		if err := json.Unmarshal([]byte(sourceItem.Genres), &genres); err == nil && len(genres) > 0 {
-			// 构建 OR 条件，查询包含任何相同流派的项目
-			likePatterns := make([]string, 0, len(genres))
-			values := make([]interface{}, 0, len(genres))
-			for _, genre := range genres {
-				likePatterns = append(likePatterns, "genres LIKE ?")
-				values = append(values, "%"+genre+"%")
-			}
-
-			if len(likePatterns) > 0 {
-				query = query.Where(strings.Join(likePatterns, " OR "), values...)
-			}
-		}
-	}
-
-	// 如果有年份信息，也考虑相近年份
-	if sourceItem.Year != nil && *sourceItem.Year > 0 {
-		yearMin := *sourceItem.Year - 3
-		yearMax := *sourceItem.Year + 3
-		query = query.Where("year BETWEEN ? AND ?", yearMin, yearMax)
-	}
-
-	query = query.Order("name asc")
-	if limit > 0 {
-		query = query.Limit(limit)
-	}
-
-	if err := query.Find(&items).Error; err != nil {
-		return nil, err
-	}
-
-	return items, nil
+func (s *SearchService) FindSimilarItems(id string, limit int) ([]database.MediaItem, error) {
+	return s.repository.FindSimilarItems(id, limit)
+}
+func NewSearchServiceWithRepository(r repo.Search) *SearchService {
+	return &SearchService{repository: r}
 }

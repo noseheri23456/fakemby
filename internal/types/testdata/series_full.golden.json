@@ -30,6 +30,10 @@
     "科幻",
     "剧情"
   ],
+  "Studios": [],
+  "Tags": [],
+  "Taglines": [],
+  "People": [],
   "ImageTags": {
     "Primary": "ww123456"
   },
@@ -37,6 +41,7 @@
     "bgww0001"
   ],
   "PrimaryImageAspectRatio": 0.6666666666666666,
+  "ParentBackdropImageTags": [],
   "UserData": {
     "PlaybackPositionTicks": 0,
     "PlayCount": 0,
@@ -48,6 +53,7 @@
   "MediaSources": [],
   "ProviderIds": {},
   "RemoteTrailers": [],
+  "Subviews": [],
   "DateCreated": "2024-01-01T00:00:00Z",
   "DateModified": "2024-01-01T00:00:00Z",
   "PresentationUniqueKey": "item-series",

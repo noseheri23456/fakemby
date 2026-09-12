@@ -60,17 +60,14 @@ func TestGetItemsBySeasonParentID(t *testing.T) {
 	assert.Equal(t, []string{testutil.EpisodeID}, ids)
 }
 
-func TestGetItemsFallsBackWhenParentFilterEmpty(t *testing.T) {
+func TestGetItemsUnknownParentDoesNotBroadenAccess(t *testing.T) {
 	env := testutil.Setup(t)
 	svc := service.NewMediaService(env.DB)
 
-	// 客户端缓存了旧库 ID 时，过滤结果为空 → 回退为不加 parent_id 过滤。
-	// 注意当前实现会连 recursive=false 的"只返回顶级"约束一起丢掉，因此返回全部 4 条。
-	// 这个行为算不上优雅（更合理的是回退到顶级列表），但它是为兼容旧客户端缓存写的，
-	// 此处把现状钉死：谁改了它，必须是有意为之。
+	// Unknown or stale parent IDs must not remove authorization filters.
 	stale := "lib-not-exist"
 	_, total := get(t, svc, "", &stale, false, nil, "", "", 0, 0)
-	assert.Equal(t, int64(4), total)
+	assert.Zero(t, total)
 }
 
 func TestGetItemsFilterByType(t *testing.T) {

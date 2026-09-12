@@ -11,6 +11,7 @@ import (
 	"github.com/fakemby/fakemby/internal/config"
 	"github.com/fakemby/fakemby/internal/database"
 	"github.com/fakemby/fakemby/internal/infra/signer"
+	"github.com/fakemby/fakemby/internal/infra/source"
 	"github.com/fakemby/fakemby/internal/service"
 	"github.com/fakemby/fakemby/internal/types"
 	"github.com/gin-gonic/gin"
@@ -75,11 +76,23 @@ func playbackAuth(sgn *signer.Signer, expiryDays int) gin.HandlerFunc {
 				p := signer.Payload{
 					MediaType:  c.DefaultQuery("type", "video"),
 					ItemID:     c.Param("itemId"),
-					SourceID:   firstNonEmpty(c.Query("mediaSourceId"), c.Query("MediaSourceId")),
+					SourceID:   firstNonEmpty(c.Param("mediaSourceId"), c.Query("mediaSourceId"), c.Query("MediaSourceId")),
 					UserID:     c.Query("uid"),
 					ExtraIndex: c.Param("index"),
+					IP:         signedClientIP(c),
 				}
 				if err := sgn.Verify(p, exp, c.Query("sig")); err == nil {
+					var user database.User
+					if database.Get().Where("id = ?", p.UserID).First(&user).Error != nil || !authorizeMediaRequest(c, &user) {
+						if !c.IsAborted() {
+							c.AbortWithStatusJSON(401, ErrUnauthorized)
+						}
+						return
+					}
+					if strings.Contains(strings.ToLower(c.FullPath()), "playbackinfo") {
+						tokenAuth(c)
+						return
+					}
 					c.Set("user_id", c.Query("uid"))
 					c.Set("auth_method", "signature")
 					c.Next()
@@ -110,6 +123,10 @@ func verifySignedURL(sgn *signer.Signer) gin.HandlerFunc {
 		}
 
 		payload := c.Query("payload")
+		if cfg := config.Get(); cfg != nil && cfg.Playback.BindIP && payload != "" {
+			c.JSON(400, gin.H{"Message": "raw payload is unavailable with IP binding"})
+			return
+		}
 		if payload == "" {
 			payload = signer.Payload{
 				MediaType:  c.DefaultQuery("type", "video"),
@@ -117,6 +134,7 @@ func verifySignedURL(sgn *signer.Signer) gin.HandlerFunc {
 				SourceID:   c.Query("source_id"),
 				UserID:     c.Query("uid"),
 				ExtraIndex: c.Query("index"),
+				IP:         signedClientIP(c),
 			}.String()
 		}
 
@@ -144,8 +162,11 @@ func getPlaybackInfo(mediaSvc *service.MediaService, playbackSvc *service.Playba
 		userID := c.GetString("user_id")
 
 		var req PlaybackInfoRequest
-		if err := c.BindJSON(&req); err != nil {
-			// 如果没有 body，也允许继续（某些客户端可能不发送 body）
+		if c.Request.ContentLength > 0 {
+			if c.ShouldBindJSON(&req) != nil {
+				c.JSON(400, ErrBadRequest)
+				return
+			}
 		}
 
 		// 获取媒体项目
@@ -241,6 +262,7 @@ func getPlaybackInfo(mediaSvc *service.MediaService, playbackSvc *service.Playba
 					ItemID:    itemID,
 					SourceID:  src.ID,
 					UserID:    userID,
+					IP:        signedClientIP(c),
 				})
 				if err == nil {
 					streamURL += fmt.Sprintf("&uid=%s&exp=%d&sig=%s",
@@ -253,7 +275,7 @@ func getPlaybackInfo(mediaSvc *service.MediaService, playbackSvc *service.Playba
 			sourceDTO := types.MediaSourceDto{
 				ID:                      src.ID,
 				Name:                    src.Name,
-				Path:                    src.URL,
+				Path:                    streamURL,
 				Protocol:                "Http",
 				Type:                    "Default",
 				Container:               src.Container,
@@ -341,11 +363,11 @@ func streamVideo(mediaSvc *service.MediaService) gin.HandlerFunc {
 			"user_id", userID,
 			"item_id", itemID,
 			"item_name", item.Name,
-			"source_url", selectedSource.URL,
+			"source_id", selectedSource.ID,
 		)
 
 		// 返回 302 重定向到实际播放 URL
-		c.Redirect(http.StatusFound, selectedSource.URL)
+		redirectSource(c, selectedSource)
 	}
 }
 
@@ -361,7 +383,7 @@ func downloadVideo(mediaSvc *service.MediaService) gin.HandlerFunc {
 		}
 
 		// 使用第一个源进行下载重定向
-		c.Redirect(http.StatusFound, sources[0].URL)
+		redirectSource(c, &sources[0])
 	}
 }
 
@@ -398,4 +420,46 @@ func streamSubtitle(mediaSvc *service.MediaService) gin.HandlerFunc {
 // intPtr 辅助函数：创建 int 指针
 func intPtr(v int) *int {
 	return &v
+}
+
+func signedClientIP(c *gin.Context) string {
+	if cfg := config.Get(); cfg != nil && cfg.Playback.BindIP {
+		return c.ClientIP()
+	}
+	return ""
+}
+func redirectSource(c *gin.Context, src *database.MediaSource) {
+	cfg := config.Get()
+	var resolver source.SourceResolver = source.Direct{}
+	if strings.EqualFold(src.Protocol, "strm") {
+		resolver = source.STRM{Root: cfg.Playback.STRMRoot}
+	}
+	result, err := resolver.Resolve(c.Request.Context(), src.URL)
+	if err != nil {
+		c.JSON(502, gin.H{"Message": "Unable to resolve media source"})
+		return
+	}
+	raw := result.URL
+	if cfg.ShouldSign(raw) {
+		sgn := signer.New(cfg.Playback.SignKey, cfg.Playback.SignTTL)
+		payload := signer.Payload{MediaType: "video", ItemID: src.ItemID, SourceID: src.ID, UserID: c.GetString("user_id"), IP: signedClientIP(c)}
+		exp, sig, err := sgn.Sign(payload)
+		if err != nil {
+			c.JSON(503, gin.H{"Message": "Signing unavailable"})
+			return
+		}
+		u, _ := url.Parse(raw)
+		q := u.Query()
+		q.Set("item_id", src.ItemID)
+		q.Set("source_id", src.ID)
+		q.Set("uid", payload.UserID)
+		q.Set("type", "video")
+		q.Set("exp", strconv.FormatInt(exp, 10))
+		q.Set("sig", sig)
+		u.RawQuery = q.Encode()
+		raw = u.String()
+		slog.Info("Signed source redirect", "item_id", src.ItemID, "source_id", src.ID, "expires", exp, "ip_bound", payload.IP != "")
+	}
+	c.Header("Referrer-Policy", "no-referrer")
+	c.Redirect(http.StatusFound, raw)
 }

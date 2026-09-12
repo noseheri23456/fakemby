@@ -2,19 +2,17 @@ package main
 
 import (
 	"context"
-	"crypto/sha1"
-	"encoding/base64"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
+	adminapi "github.com/fakemby/fakemby/internal/api/admin"
+	"github.com/fakemby/fakemby/internal/api/emby"
 	"github.com/fakemby/fakemby/internal/config"
 	"github.com/fakemby/fakemby/internal/database"
-	"github.com/fakemby/fakemby/internal/emby"
 	"github.com/fakemby/fakemby/internal/logging"
 	"github.com/gin-gonic/gin"
 )
@@ -29,6 +27,14 @@ func main() {
 	if err != nil {
 		logger.Error("加载配置失败", "error", err)
 		os.Exit(1)
+	}
+
+	if handled, err := command(cfg); handled {
+		if err != nil {
+			logger.Error("Command failed", "error", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	// 真正把 log.level / log.file 接进 slog handler（M0-8）
@@ -46,7 +52,7 @@ func main() {
 	cfg.PrintConfig()
 
 	// 初始化数据库（读连接池大小可配，写连接池固定单连接，A2）
-	_, err = database.Init(cfg.Database.Path, cfg.Database.WALMode, cfg.Database.MaxOpenConns, cfg.Database.MaxIdleConns)
+	_, err = database.InitConfigured(cfg.Database)
 	if err != nil {
 		logger.Error("数据库初始化失败", "error", err)
 		os.Exit(1)
@@ -72,6 +78,8 @@ func main() {
 	router := gin.New()
 
 	// 注册中间件
+	_ = router.SetTrustedProxies(nil)
+	router.Use(gin.Recovery(), emby.OperationsMiddleware())
 	router.Use(emby.CORSMiddleware(cfg))
 	router.Use(emby.RequestLogMiddleware())
 	router.Use(emby.ErrorHandlerMiddleware())
@@ -83,9 +91,9 @@ func main() {
 	emby.RegisterUserDataRoutes(router, cfg) // Task 4.3 fix
 	emby.RegisterItemRoutes(router, cfg)
 	emby.RegisterShowRoutes(router, cfg)
-	emby.RegisterAdminItemRoutes(router)
-	emby.RegisterImportRoutes(router)
-	emby.RegisterAdminUserRoutes(router)
+	adminapi.RegisterAdminItemRoutes(router)
+	adminapi.RegisterImportRoutes(router)
+	adminapi.RegisterAdminUserRoutes(router)
 	emby.RegisterPlaybackRoutes(router, cfg)
 	emby.RegisterSessionRoutes(router, cfg)
 	emby.RegisterImageRoutes(router, cfg)
@@ -93,11 +101,8 @@ func main() {
 	emby.RegisterStatsRoutes(router, cfg)
 	emby.RegisterCompatRoutes(router, cfg)
 
-	// WebSocket 端点 - 客户端连接保活（原生实现）
-	router.GET("/embywebsocket", handleWebSocket)
-	// Emby Theater / 官方客户端连接的路径变体（实测 Theater 3.0.20 会两个都试）
-	router.GET("/embysocket", handleWebSocket)
-	router.GET("/emby/embysocket", handleWebSocket)
+	emby.RegisterWebSocketRoutes(router, cfg)
+	emby.RegisterOperations(router)
 
 	// 创建带大小写不敏感路由包装的 HTTP Handler
 	handler := emby.CaseInsensitiveHandler(router)
@@ -130,68 +135,14 @@ func main() {
 	sig := <-sigChan
 	logger.Info("收到关闭信号", "signal", sig)
 
-	// 关闭进度缓冲系统（flush 所有剩余数据）
-	emby.ShutdownProgressBuffer()
-
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	emby.ShutdownWebSockets()
+	defer emby.ShutdownProgressBuffer()
 	if err := server.Shutdown(ctx); err != nil {
 		logger.Error("服务器关闭失败", "error", err)
 	} else {
 		logger.Info("✓ 服务器安全关闭")
 	}
-}
-
-// handleWebSocket 原生 WebSocket 握手实现（客户端连接保活）
-//
-// 时序要点：必须先 Hijack 再手写 101 响应。gin 的 WriteHeader 是延迟写，
-// 若先 WriteHeader(101) 再 Hijack，101 永远不会被刷到底层 socket，
-// 客户端会无限等待握手响应（实测 Emby Theater/ curl 均挂死）。
-func handleWebSocket(c *gin.Context) {
-	if !strings.Contains(strings.ToLower(c.GetHeader("Upgrade")), "websocket") {
-		c.Status(http.StatusBadRequest)
-		return
-	}
-
-	key := c.GetHeader("Sec-WebSocket-Key")
-	if key == "" {
-		c.Status(http.StatusBadRequest)
-		return
-	}
-
-	magic := "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-	hash := sha1.Sum([]byte(key + magic))
-	accept := base64.StdEncoding.EncodeToString(hash[:])
-
-	hj, ok := c.Writer.(http.Hijacker)
-	if !ok {
-		c.Status(http.StatusInternalServerError)
-		return
-	}
-	conn, buf, err := hj.Hijack()
-	if err != nil {
-		c.Status(http.StatusInternalServerError)
-		return
-	}
-
-	resp := "HTTP/1.1 101 Switching Protocols\r\n" +
-		"Upgrade: websocket\r\n" +
-		"Connection: Upgrade\r\n" +
-		"Sec-WebSocket-Accept: " + accept + "\r\n\r\n"
-	if _, err := conn.Write([]byte(resp)); err != nil {
-		_ = conn.Close()
-		return
-	}
-
-	go func() {
-		defer func() { _ = conn.Close() }()
-		for {
-			// read messages and ignore to keep connection alive
-			_, err := buf.ReadByte()
-			if err != nil {
-				return
-			}
-		}
-	}()
 }

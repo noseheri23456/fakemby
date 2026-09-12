@@ -138,6 +138,8 @@ func unmarkAsFavorite(playSvc *service.PlaybackService, mediaSvc *service.MediaS
 
 func getResumeItems(playSvc *service.PlaybackService, mediaSvc *service.MediaService) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		playSvc := service.NewPlaybackService(scopedMediaDB(c))
+		mediaSvc := scopedMediaService(c)
 		userID := c.Param("userId")
 
 		// 归属校验已由 RequireUserMatch 中间件完成（M0-5）

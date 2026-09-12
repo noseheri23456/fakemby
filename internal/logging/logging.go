@@ -15,6 +15,9 @@ import (
 // 支持两个输出目标：stderr（始终）与可选的日志文件（log.file）。
 // 级别非法时回落 info。
 func Setup(cfg *config.Config) (*slog.Logger, error) {
+	if err := cfg.EnsureLogDir(); err != nil {
+		return nil, err
+	}
 	level := parseLevel(cfg.Log.Level)
 
 	opts := &slog.HandlerOptions{Level: level}
@@ -35,7 +38,7 @@ func Setup(cfg *config.Config) (*slog.Logger, error) {
 		w = io.MultiWriter(writers...)
 	}
 
-	logger := slog.New(slog.NewTextHandler(w, opts))
+	logger := slog.New(slog.NewJSONHandler(w, opts))
 	slog.SetDefault(logger)
 	return logger, nil
 }
