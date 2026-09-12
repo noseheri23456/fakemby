@@ -2,139 +2,143 @@
 
 轻量级 Emby 兼容媒体服务器，用 Go 编写。
 
-放弃传统扫库/刮削流程，通过 API 直接写入元数据与播放链接，以 302 重定向方式串流外部视频源。适用于个人/小型组织的媒体共享场景。
+不扫库、不刮削：元数据与播放链接由上游导入方通过 API 直写，播放以 302 重定向方式串流外部视频源（115、网盘、CDN 等），服务器本身零带宽。适合个人或小团队的媒体共享场景。
 
 ## 特性
 
-- **Emby API 兼容** — 42+ 个端点，兼容小幻影视、SenPlayer、RodelPlayer 等客户端
-- **单二进制部署** — 纯 Go 实现，无 CGO 依赖，约 39MB
-- **302 重定向播放** — 视频流来自外部 URL（115、Google Drive、CDN 等），服务器零带宽
-- **智能图片处理** — 重定向模式（零带宽）或代理缓存模式（本地缓存+缩放）
-- **播放进度同步** — 30s 内存缓冲 + 批量写入，避免 SQLite 锁冲突
-- **HMAC 直链签名** — 播放直链带时效签名（HMAC-SHA256），并开放 `/api/auth/verify` 供自建反代回调校验
-- **Docker 就绪** — 多阶段构建，Alpine 运行时镜像
+- **Emby API 兼容** —— 40+ 端点，官方 Emby Theater 与第三方客户端（小幻影视 / SenPlayer / RodelPlayer 等）可用
+- **零带宽串流** —— 302 重定向到外部源，服务端不中转视频流量
+- **智能图片** —— `redirect`（零带宽）或 `proxy_cache`（服务端代取 + 本地缓存 + 缩放）两种模式
+- **播放进度同步** —— 内存缓冲 + 批量落库，进程优雅关闭前自动 flush，避免 SQLite 锁冲突
+- **多用户与策略** —— 按库访问控制、家长分级、并发会话上限；管理面统一走 `X-Api-Key`
+- **直链签名** —— 播放直链可带 HMAC-SHA256 时效签名，`/api/auth/verify` 供自建反代回调校验
+- **实时 WebSocket** —— 官方客户端兼容的订阅协议（`<Name>Start` → 首帧快照，播放 / 已看 / 收藏等事件推送）
+- **可运维部署** —— 单静态二进制；多阶段 Docker 镜像（非 root、只读根文件系统）；极简 Helm chart；GoReleaser 多架构发布
+- **数据可迁移** —— `fakemby export` / `import` 快照子命令，整库条目 / 用户 / 配置一键搬迁
 
-> ⚠️ **安全边界（务必阅读）**：签名只在「直链服务端愿意校验我方签名」时才有防盗链意义
-> （自建反代 / OpenList）。对不配合校验的第三方 CDN，防线是 PlaybackInfo 自身的鉴权与源站 URL 的时效性。
-> 详见 [docs/CONFIGURATION.md](docs/CONFIGURATION.md) 的 `playback.sign_prefixes`。
+> ⚠️ **签名防护边界**：签名只在「直链服务端愿意校验我方签名」时才有防盗链意义（自建反代 / OpenList）。对不配合校验的第三方 CDN，防线是 `PlaybackInfo` 自身的鉴权与源站 URL 的时效性。详见 [配置指南](docs/CONFIGURATION.md) 的 `playback.sign_prefixes`。
 
 ## 快速开始
 
-### Docker（推荐）
+### 方式一：Docker Compose（推荐）
 
 ```bash
 git clone https://github.com/fakemby/fakemby.git && cd fakemby
-# 管理接口必须配置密钥，否则 /api/admin/* 会拒绝所有请求
-FAKEMBY_ADMIN_API_KEY=$(openssl rand -hex 16) docker-compose up -d
+
+# 导出两个必需密钥（compose 会在缺失时拒绝启动）
+export FAKEMBY_ADMIN_API_KEY=$(openssl rand -hex 16)
+export FAKEMBY_PLAYBACK_SIGN_KEY=$(openssl rand -hex 32)
+
+docker compose up -d
 ```
 
-### 本地编译
+- 默认只绑定 loopback（`127.0.0.1:8096`）；开放给局域网 / 反代需设 `FAKEMBY_BIND_ADDRESS=0.0.0.0`。
+- 默认镜像模式 `proxy_cache`（服务端代取图片）；改回零带宽重定向：`FAKEMBY_IMAGE_MODE=redirect`。
+- 容器以 UID/GID `10001` 运行，根文件系统只读，数据库与缓存落在命名卷 `fakemby-data`。
+
+### 方式二：本地编译
 
 ```bash
-# 需要 Go 1.26+（见 go.mod）
+# 需要 Go 1.26.3+（见 go.mod）
 CGO_ENABLED=0 go build -o fakemby ./cmd/fakemby
 ./fakemby
 ```
 
-服务器启动后访问 `http://localhost:8096`，默认账户 `admin` / `admin`。
+启动后访问 `http://localhost:8096`。默认账户 `admin` / `admin`，**首次登录会被强制要求改密**。
 
-> 首次部署请务必修改两处：
-> 1. `admin.api_key`（或 `FAKEMBY_ADMIN_API_KEY`）—— 留空或仍为 `change-me` 时管理接口全部拒绝；
-> 2. 默认账号 `admin` / `admin` 的密码。
-
-### 导入测试数据
-
-```bash
-export FAKEMBY_ADMIN_API_KEY=<与配置一致的密钥>
-
-# Bash
-bash scripts/test/import_test_data.sh
-
-# Python
-python3 scripts/test/import_test_data.py
-```
+> 生产部署务必设置：① `admin.api_key` / `FAKEMBY_ADMIN_API_KEY`（留空或仍为 `change-me` 时 `/api/admin/*` 全部拒绝）；② `playback.sign_key` / `FAKEMBY_PLAYBACK_SIGN_KEY`（留空时启动生成临时随机密钥，重启后旧直链失效）；③ 修改默认 `admin` 口令。
 
 ### 连接客户端
 
-在小幻影视 / SenPlayer / RodelPlayer 中：
+在 Emby Theater / 小幻影视 / SenPlayer / RodelPlayer 中：
+
 - 服务器地址：`http://<your-host>:8096`
 - 用户名：`admin`
-- 密码：`admin`
+- 密码：`admin`（首次登录后按提示修改）
 
-## 文档
+### 导入媒体数据
 
-| 文档 | 说明 |
-|------|------|
-| [架构设计](docs/ARCHITECTURE.md) | 技术栈、目录结构、核心组件、设计模式 |
-| [API 参考](docs/API.md) | 全部 Emby 端点与管理端点的完整说明 |
-| [配置指南](docs/CONFIGURATION.md) | YAML 配置项、环境变量、数据库表结构 |
-| [部署指南](docs/DEPLOYMENT.md) | Docker、裸机、Kubernetes 部署方式 |
-| [开发指南](docs/DEVELOPMENT.md) | 构建、测试、添加新端点的流程 |
-| [继续开发方案](docs/ROADMAP.md) | 现状审计、风险清单、M0–M4 实施路线（M0、M1 已完成） |
-
-## 测试
-
-M1 已建立测试与 CI 基线，常用命令：
+元数据由导入方提供，不自动扫描。两种导入途径：
 
 ```bash
-go test ./...                     # 全量测试（含契约测试与安全回归）
-go test -race ./...               # 带竞态检测（Windows 见下方说明）
-go test ./internal/service/... -cover        # service 层覆盖率（当前 71%）
-go test ./tests/integration/... -v           # 端到端冒烟（10 步，进程内起服务）
-go test ./internal/types/... -update         # 重写 DTO golden 文件
-golangci-lint run                            # 静态检查（配置见 .golangci.yml）
+# 1) 管理 API（需 X-Api-Key）
+export FAKEMBY_ADMIN_API_KEY=<你的密钥>
+curl -X POST "http://localhost:8096/api/admin/import" \
+  -H "X-Api-Key: $FAKEMBY_ADMIN_API_KEY" -H "Content-Type: application/json" \
+  -d @movies.json
+
+# 2) 测试样本（仓库内置脚本）
+bash scripts/test/import_test_data.sh        # 或 python3 scripts/test/import_test_data.py
 ```
 
-Windows 上 `-race` 需要 cgo，也就是需要一个 gcc。若 gcc 不在 PATH 中（例如只有 Nuitka 缓存里的那份 MinGW），用项目自带的脚本自动探测：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev\test-race.ps1
-```
-
-它会依次查找 `$env:CC`、PATH、常见安装位置（Nuitka 缓存 / TDM-GCC / MSYS2 / mingw64 / Chocolatey），找到后通过 `CC` 环境变量传给 `go`。也可以手动指定：
-
-```powershell
-$env:CC = 'C:\path\to\gcc.exe'; $env:CGO_ENABLED = '1'; go test -race ./...
-```
-
-对活体服务跑同一套冒烟：
+整库迁移可用快照子命令：
 
 ```bash
-FAKEMBY_SMOKE_BASE_URL=http://host:8096 FAKEMBY_ADMIN_API_KEY=<key> \
-  go test ./tests/integration/... -run TestSmoke -v
+fakemby export snapshot.json      # 导出条目 / 库 / 用户 / 配置到文件
+fakemby import snapshot.json      # 在新实例导入（版本不符直接拒绝，不写库）
 ```
 
-测试脚手架在 `internal/testutil/`：三行代码即可拿到「内存库 + 种子数据 + 挂好全部路由的 gin 引擎」。
+## 配置
 
-```go
-env := testutil.Setup(t)                    // 内存 SQLite + 种子数据 + 测试配置
-ts := testutil.NewTestServer(t, env.Cfg)    // 真实 HTTP 服务
+配置文件 `config.yaml` 可选；缺失时回落内置默认值并告警。所有项可用 `FAKEMBY_` 前缀的环境变量覆盖（层级用 `_` 分隔）。完整说明见 [配置指南](docs/CONFIGURATION.md)。
+
+| 环境变量 | 说明 |
+|---------|------|
+| `FAKEMBY_SERVER_PORT` / `FAKEMBY_SERVER_HOST` | 监听端口 / 地址（默认 8096 / `0.0.0.0`）|
+| `FAKEMBY_SERVER_CORS_ORIGINS` | CORS 白名单，逗号分隔；空 = 同源（不输出 CORS 头）|
+| `FAKEMBY_DATABASE_PATH` | SQLite 路径 |
+| `FAKEMBY_AUTH_TOKEN_EXPIRY_DAYS` | Token 有效期（天）|
+| `FAKEMBY_IMAGE_MODE` | `redirect` 或 `proxy_cache` |
+| `FAKEMBY_IMAGE_CACHE_MAX_MB` | proxy_cache 磁盘配额（MB，0 = 不限）|
+| `FAKEMBY_PLAYBACK_REDIRECT` | 是否 302 重定向播放 |
+| `FAKEMBY_PLAYBACK_SIGN_KEY` | HMAC 签名密钥（必填，持久化）|
+| `FAKEMBY_PLAYBACK_SIGN_TTL` | 签名有效期（秒）|
+| `FAKEMBY_PLAYBACK_SIGN_PREFIXES` | 仅对这些 URL 前缀签名；空 = 全部签名 |
+| `FAKEMBY_ADMIN_API_KEY` | 管理 API 密钥（必填）|
+| `FAKEMBY_LOG_LEVEL` | `debug` / `info` / `warn` / `error` |
+
+> 注意：早期文档里的 `LOG_LEVEL`、`SERVER_PORT`（无前缀）**不会生效**；请统一用 `FAKEMBY_` 前缀。
+
+## 部署
+
+### Docker / Compose
+
+镜像以非 root（UID/GID `10001`）运行，根文件系统只读、丢弃全部 Linux capabilities、不挂载秘密文件。健康检查命中 `/readyz`（ping SQLite，不可达返回 503），另提供常驻 `/healthz`（恒 200）。数据库与图片缓存在命名卷 `fakemby-data`；升级前请先备份 SQLite（含 WAL 一致态）再迁移进新卷，归属改为 `10001:10001`。
+
+### Kubernetes（Helm）
+
+极简 chart 位于 `deploy/helm/fakemby`：固定单副本（`Recreate` 策略）、保留的 SQLite PVC、引用既有 Secret、就绪 / 存活探针、受限安全上下文。
+
+```bash
+# 1) 在目标命名空间建 Secret（两键必填，值勿写入 values/history）
+kubectl create secret generic fakemby-secrets \
+  --namespace fakemby --from-literal=admin-api-key=<强密钥> \
+  --from-literal=playback-sign-key=<持久密钥>
+
+# 2) 安装（从源码装须覆盖 image.tag 为已发布版本；appVersion 仅记历史基线）
+helm install fakemby deploy/helm/fakemby --namespace fakemby
 ```
 
-## 项目结构
+### 发布与镜像
 
-```
-fakemby/
-├── cmd/fakemby/main.go           # 入口点
-├── internal/
-│   ├── config/config.go          # Viper YAML 配置 + 环境变量绑定
-│   ├── logging/                  # slog handler（level / file）
-│   ├── database/
-│   │   ├── database.go           # DB 初始化、迁移
-│   │   └── models.go             # GORM 模型
-│   ├── emby/                     # Emby API 兼容层
-│   ├── service/                  # 业务逻辑
-│   ├── infra/signer/             # HMAC 直链签名与校验
-│   └── types/dto.go              # DTO 定义
-├── scripts/
-│   ├── dev/                      # 开发辅助脚本
-│   └── test/                     # 测试/导入脚本
-├── config.yaml                   # 默认配置
-├── Dockerfile / docker-compose.yml
-└── go.mod / go.sum
-```
+GoReleaser v2 产出 Linux amd64/arm64 归档（含 SHA-256 校验和）；打 tag 后向 `ghcr.io/<owner>/<repo>` 推送多平台镜像。语义化版本与 CHANGELOG 约定见 [CHANGELOG.md](CHANGELOG.md)。
+
+## 管理 API
+
+管理面统一前缀 `/api/admin/*`，需带 `X-Api-Key` 请求头（值 = `admin.api_key`）。主要端点：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/api/admin/stats` | 服务统计 |
+| `GET` / `POST` | `/api/admin/users` | 用户列表 / 创建 |
+| `DELETE` | `/api/admin/users/:userId` | 删除用户 |
+| `PUT` | `/api/admin/users/:userId/policy` | 更新用户策略（按库访问、家长分级、会话上限）|
+| `POST` | `/api/admin/users/:userId/password` | 改密 |
+| `POST` | `/api/admin/import` | 批量导入媒体（幂等 upsert + dry-run + 事务回滚）|
+| `POST` / `PUT` / `DELETE` | `/api/admin/items[/...]` | 条目与播放源增改删 |
+| `POST` / `PUT` / `DELETE` | `/api/admin/libraries[/...]` | 媒体库增改删 |
+| `POST` | `/api/admin/progress/flush` | 立即 flush 播放进度缓冲 |
 
 ## 许可证
 
 MIT License
-
