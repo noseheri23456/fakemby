@@ -199,7 +199,7 @@ internal/
 | ID | 任务 | 说明 | 验收标准 |
 |----|------|------|----------|
 | M3-1 ⏳ | **官方客户端兼容基线**（最高优先级） | ① 把真实客户端的请求序列固化成回归资产：解析 `dist/server.log` 得到「登录→首页→点磁贴→进库→点条目→详情→播放」的请求轨迹，生成断言用例；② **响应字段安全审计**：客户端对数组/对象字段存在大量裸调用（`.length`/`.includes`/`.filter`），凡被裸调用的字段服务端必须恒返回 `[]`/`{}` 而非缺失或 `null`，逐条补契约测试；③ 已修必补项（`System/Endpoint`、`User.Configuration` 全字段、条目详情支持媒体库 ID、`RequiredHttpHeaders`）全部钉死为回归用例 | Emby Theater 3.0.20 全流程无 `Content no longer available`；`scripts/dev/probe_theater.py` 升级为可断言套件并进 CI |
-| M3-2 | **补齐缺失端点**（按实测差异排序） | 官方客户端实测 404 且影响主链路：`/Shows/NextUp`、`/Items/{id}/SpecialFeatures`、`/Videos/{id}/AdditionalParts`、`/Items/Filters`、`/Channels`、`/QuickConnect/Enabled`；次要：`/Genres`、`/Studios`、`/Persons/{id}`、`/Items/{id}/Intros`、`/Playlists`、`/Collections`（可返回空集合）。已实现的不重复做：`/System/Configuration`、`/System/Endpoint`、`/Items/{id}/Similar`、`/Items/{id}/Ancestors`、`/LiveTv/{Recordings,Tuners}` | 首页/详情页/库浏览三个场景无 404；次要端点返回结构正确（允许空） |
+| M3-2 | **补齐缺失端点**（按实测差异排序） | **v1.6 复核：v1.4 列的 6 个「实测 404」里 5 个其实已随 M2 重构落地**（`NextUp`、`Items/Filters`、`Channels`、`Genres`、`Studios` 均 200），真正缺的只剩 `LiveTv/Channels`。本轮实测又发现 3 个**契约形态**问题（不是 404 但同样会崩）：`Ancestors` 因 nil 切片返回 `null`、`QuickConnect/Enabled` 返回裸布尔而非 `{"Enabled":false}`、`LiveTv/Channels` 404。均已修。次要项：`/Genres`、`/Studios`、`/Persons/{id}`、`/Items/{id}/Intros`、`/Playlists`、`/Collections` 已实现（可返回空集合） | 首页/详情页/库浏览三个场景无 404；列表端点返回结构正确（允许空） |
 | M3-3 | **真实 WebSocket**（修 A8） | RFC6455 帧解析/编码 + ping/pong 心跳 + Session Hub 广播（`Sessions`、`UserDataChanged`、`LibraryChanged`），可用 `gorilla/websocket` 或 `coder/websocket` | 客户端能收到实时更新，长时间连接不掉 |
 | M3-4 | **签名与防盗链闭环**（接 M0-7） | 可选 IP 绑定、`redirect_mode: signed\|plain` 灰度开关、签名审计日志 | 新旧源混跑期间可逐前缀切换 |
 | M3-5 | **搜索增强** | 现仅 `Search/Hints`。加拼音/别名匹配、按类型加权、结果高亮字段。**拼音走本地库或自建映射表，不引入任何在线查询** | 中文标题模糊搜索命中率提升 |
@@ -583,11 +583,66 @@ M3 期间若再现需专项排查。
    还会给所有响应平白增加字段。
 
 **M3-1 剩余**：把 `dist/server.log` 的真实请求序列解析成断言用例（当前以
-`clientFacingEndpoints` 清单手工固化，尚未做成 log 驱动）；`probe_theater.py` 升级为可断言套件。
+`clientFacingEndpoints` 清单手工固化，尚未做成 log 驱动）；`probe_theater.py` 已是可断言
+套件且已在 CI 中运行（`.github/workflows/ci.yml`），但**审计工具不进 CI**——它依赖本机
+安装的 Emby Theater 源码，Linux runner 上没有。
+
+**M3-2 端点补全 · 进行中（v1.6 复核：旧清单严重过时）**
+
+对 18097 端口的临时服务做全量端点实测（隔离 DB + 导入样本），结果推翻了 v1.4 的判断：
+
+| 端点 | v1.4 清单 | 实测 |
+|------|-----------|------|
+| `Shows/NextUp` | 缺 | **已实现 200** |
+| `Items/Filters` | 缺 | **已实现 200** |
+| `Channels` | 缺 | **已实现 200** |
+| `Genres` / `Studios` | 缺 | **已实现 200** |
+| `Playlists` / `Collections` / `Persons` | 次要 | **已实现 200** |
+| `Items/{id}/SpecialFeatures` | 缺 | **已实现**，返回 `[]` |
+| `Videos/{id}/AdditionalParts` / `Items/{id}/Intros` | 缺 | **已实现**，返回 `{Items:[]}` |
+| `LiveTv/Channels` | — | **404**，本轮补上 |
+| `QuickConnect/Enabled` | — | 200 但**返回裸布尔 `false`**，本轮改为 `{"Enabled":false}` |
+| `Items/{id}/Ancestors` | 已实现 | 200 但**返回 `null`**，本轮修复 |
+
+教训：v1.4 清单写于 M2 重构**入库之前**，而重构实际补齐了大部分端点。
+**写"缺什么"清单前必须先跑一遍实测**，否则会照着过时的清单做无用功。
+
+本轮修的 3 处（都不是 404，但同样会让客户端崩）：
+1. `getAncestors` 用 `var ancestors []interface{}`，无父级时 nil 切片序列化成 `null`
+   → 改为 `make([]interface{}, 0)`。这是 M3-1 要根除的同一类模式，在别处又撞见一次。
+2. `QuickConnect/Enabled` 返回裸布尔，官方是 `{"Enabled": bool}`（客户端读 `.Enabled`）。
+3. `LiveTv/Channels` 404——同族的 `Recordings`/`Tuners` 都有，只缺它；
+   `Policy.EnableLiveTvAccess=false` 时官方客户端不请求，但第三方客户端可能无条件探测。
+
+**契约形态比状态码更重要**：实测确认 `SpecialFeatures` 该返回**数组**
+（客户端 `items.length` 后自己包成 `{Items:…}`），而 `AdditionalParts`/`Intros`/`LiveTv/*`
+走 itemsContainer、该返回 `{Items:[]}`。两者混用会崩，已把形态差异写进
+`nullsafety_test.go` 的端点表注释。
+
+`roadmap_test.go` 原断言 QuickConnect 返回 `"false"`，本轮同步改为官方契约
+（**测试锁错契约时，要改测试而不是迁就实现**）。
+
+回归：`clientFacingEndpoints` 扩到 25 个端点，新增
+`TestAncestorsReturnsArrayNotNil`、`TestQuickConnectEnabledReturnsObject`。
+
 
 ---
 
 ## 修订记录
+
+### v1.6（2026-09-13 凌晨 M3-2 复核）
+
+1. **M3-2 清单按实测重写**：v1.4 列的 6 个「实测 404」有 5 个其实已随 M2 重构落地
+   （清单写于重构入库之前）。真正缺的只剩 `LiveTv/Channels`。
+   **教训写进 §10**：写「缺什么」清单前必须先跑实测。
+2. **修 3 处契约形态问题**（不是 404 但同样会崩）：`Ancestors` nil 切片返回 `null`、
+   `QuickConnect/Enabled` 返回裸布尔、`LiveTv/Channels` 404。
+3. **修正被错误锁定的测试**：`roadmap_test.go` 断言 QuickConnect 返回 `"false"`，
+   那是旧实现而非官方契约，本轮改为 `{"Enabled":false}`。
+4. **M3-1 状态更正**：`probe_theater.py` 早已是可断言套件且已在 CI 中运行；
+   审计工具因依赖本机客户端源码**不进 CI**。
+5. `nullsafety_test.go` 端点表扩到 25 个，并记录 SpecialFeatures（数组）与
+   AdditionalParts/Intros（{Items:[]}）的形态差异。
 
 ### v1.5（2026-09-12 晚 M3 开工）
 

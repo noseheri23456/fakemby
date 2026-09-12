@@ -111,6 +111,17 @@ var clientFacingEndpoints = []struct {
 	{"Shows/{id}/Seasons", "/emby/Shows/" + testutil.SeriesID + "/Seasons?UserId=%s", ""},
 	{"Shows/{id}/Episodes", "/emby/Shows/" + testutil.SeriesID + "/Episodes?UserId=%s", ""},
 
+	// 详情页附属板块。契约形态不统一，以客户端实际消费方式为准：
+	// SpecialFeatures 客户端直接 items.length（要数组）；
+	// AdditionalParts / Intros / LiveTv 走 itemsContainer（要 {Items:[]}）。
+	// Ancestors 曾因 nil 切片返回 null——正是本文件要根除的问题。
+	{"Items/{id}/SpecialFeatures", "/emby/Items/" + testutil.MovieID + "/SpecialFeatures", ""},
+	{"Items/{id}/Ancestors", "/emby/Items/" + testutil.MovieID + "/Ancestors", ""},
+	{"Items/{id}/Intros", "/emby/Items/" + testutil.MovieID + "/Intros", ""},
+	{"Videos/{id}/AdditionalParts", "/emby/Videos/" + testutil.MovieID + "/AdditionalParts", ""},
+	{"LiveTv/Channels", "/emby/LiveTv/Channels", ""},
+	{"QuickConnect/Enabled", "/emby/QuickConnect/Enabled", ""},
+
 	// 播放
 	{"Items/{id}/PlaybackInfo", "/emby/Items/" + testutil.MovieID + "/PlaybackInfo?UserId=%s", `{"DeviceProfile":{}}`},
 }
@@ -222,6 +233,37 @@ func TestCollectNullsReturnsEmptyForCleanJSON(t *testing.T) {
 	var nulls []string
 	collectNulls("", parsed, &nulls)
 	assert.Empty(t, nulls)
+}
+
+// TestAncestorsReturnsArrayNotNil 锁定 M3-2 修的 nil 切片问题。
+//
+// getAncestors 原先声明 `var ancestors []interface{}`，无父级时 nil 切片被
+// 序列化成 null。客户端 getAncestorItems 目前虽无调用点，但 null 是这类
+// 响应的通用崩溃源（result.length / result.map 都是裸调），必须恒返回数组。
+func TestAncestorsReturnsArrayNotNil(t *testing.T) {
+	a, _ := newAPI(t)
+
+	r := a.get("/emby/Items/"+testutil.MovieID+"/Ancestors", testutil.NormalToken)
+	require.Equal(t, http.StatusOK, r.Status)
+
+	var parsed any
+	require.NoError(t, json.Unmarshal(r.Body, &parsed), "响应必须是合法 JSON: %s", string(r.Body))
+	_, isArray := parsed.([]any)
+	assert.True(t, isArray, "Ancestors 必须返回数组（nil 切片会序列化成 null），实际: %s", string(r.Body))
+}
+
+// TestQuickConnectEnabledReturnsObject 锁定契约形态：官方是 {"Enabled": bool}，
+// 不是裸布尔值——客户端读的是 `.Enabled`。
+func TestQuickConnectEnabledReturnsObject(t *testing.T) {
+	a, _ := newAPI(t)
+
+	r := a.get("/emby/QuickConnect/Enabled", testutil.NormalToken)
+	require.Equal(t, http.StatusOK, r.Status)
+
+	body := r.JSON(t)
+	enabled, ok := body["Enabled"].(bool)
+	require.True(t, ok, "QuickConnect/Enabled 必须返回带 Enabled 布尔字段的对象，实际: %s", string(r.Body))
+	assert.False(t, enabled, "未实现 QuickConnect，应报告为未启用")
 }
 
 // TestPlaybackInfoContainerFieldsNeverNull 锁定已在 M3 修复的 RequiredHttpHeaders。

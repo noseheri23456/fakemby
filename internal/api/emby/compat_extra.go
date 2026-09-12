@@ -22,7 +22,10 @@ func registerExtraCompat(r *gin.Engine, cfg *config.Config) {
 	r.GET("/emby/Items/:itemId/Intros", auth, emptyItemsHandler())
 	r.GET("/emby/Items/Filters", auth, itemFilters())
 	r.GET("/emby/Channels", auth, emptyItemsHandler())
-	r.GET("/emby/QuickConnect/Enabled", func(c *gin.Context) { c.JSON(200, false) })
+	// 官方返回的是对象 {"Enabled": bool}，不是裸布尔值；客户端读 `.Enabled`。
+	r.GET("/emby/QuickConnect/Enabled", func(c *gin.Context) {
+		c.JSON(200, gin.H{"Enabled": false})
+	})
 	r.GET("/emby/Genres", auth, taxonomy("Genre"))
 	r.GET("/emby/Studios", auth, taxonomy("Studio"))
 	r.GET("/emby/Persons/:itemId", auth, func(c *gin.Context) {

@@ -432,7 +432,9 @@ func getAncestors(mediaSvc *service.MediaService) gin.HandlerFunc {
 		itemID := c.Param("itemId")
 		userID := c.GetString("user_id")
 
-		var ancestors []interface{}
+		// 必须初始化为空切片：nil 切片会被序列化成 null，而客户端对
+		// `result.length` / `result.map(...)` 是裸调，null 直接 TypeError（M3-1）。
+		ancestors := make([]interface{}, 0)
 		currentID := itemID
 
 		for {

@@ -42,6 +42,10 @@ func RegisterCompatRoutes(router *gin.Engine, cfg *config.Config) {
 	router.GET("/emby/livetv/tuners", auth, emptyArrayHandler())
 	router.GET("/emby/LiveTv/Recordings", auth, emptyItemsHandler())
 	router.GET("/emby/livetv/recordings", auth, emptyItemsHandler())
+	// Channels 与 Recordings 同族，缺了会 404（Policy.EnableLiveTvAccess=false 时
+	// 客户端通常不请求，但第三方客户端可能无条件探测）
+	router.GET("/emby/LiveTv/Channels", auth, emptyItemsHandler())
+	router.GET("/emby/livetv/channels", auth, emptyItemsHandler())
 
 	// Artists：无音乐库，返回空集合（Theater 收藏艺术家过滤请求）
 	router.GET("/emby/Artists", auth, emptyItemsHandler())

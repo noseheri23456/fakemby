@@ -25,7 +25,9 @@ func TestRoadmapClientSequence(t *testing.T) {
 			}
 		})
 	}
-	assert.Equal(t, "false", string(a.get("/emby/QuickConnect/Enabled", "").Body))
+	// 官方契约是对象 {"Enabled": bool}，不是裸布尔——客户端读的是 `.Enabled`。
+	qc := a.get("/emby/QuickConnect/Enabled", "")
+	assert.JSONEq(t, `{"Enabled":false}`, string(qc.Body))
 	r := a.get("/emby/Items/"+testutil.MovieID+"/SpecialFeatures", testutil.NormalToken)
 	assert.JSONEq(t, "[]", string(r.Body))
 	r = a.get("/emby/Users/"+testutil.NormalUserID+"/Items/"+testutil.MovieID, testutil.NormalToken)
