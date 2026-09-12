@@ -1,0 +1,7 @@
+apiVersion: v2
+name: fakemby
+description: Single-instance FakEmby with persistent SQLite storage
+type: application
+version: 0.1.0
+# Baseline only; release packaging replaces both versions with the release tag.
+appVersion: "0.9.0-pre"

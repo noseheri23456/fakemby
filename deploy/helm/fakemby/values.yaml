@@ -1,0 +1,49 @@
+# SQLite requires one replica; the Deployment deliberately fixes replicas to 1
+# and uses Recreate instead of allowing overlapping pods during an upgrade.
+fullnameOverride: ""
+
+image:
+  repository: ghcr.io/noseheri23456/fakemby
+  # Empty uses Chart.appVersion. Set a published release tag when using this
+  # source chart; the historical baseline tag does not imply a published image.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+service:
+  type: ClusterIP
+  port: 8096
+
+persistence:
+  # Existing claims must be writable by UID/GID 10001 and used by only this app.
+  existingClaim: ""
+  size: 5Gi
+  # null selects the cluster default; "" explicitly disables dynamic provisioning.
+  storageClass: null
+
+secrets:
+  # Create this Secret in the release namespace before installation. Keep values
+  # out of Helm values/history. Both keys are required; no Secret is generated.
+  existingSecret: fakemby-secrets
+  adminAPIKeyKey: admin-api-key
+  playbackSignKeyKey: playback-sign-key
+  # Restart the Deployment after rotating environment-backed secrets.
+
+config:
+  # Optional ConfigMap containing a non-secret configuration file. Defaults plus
+  # environment work without it. Env values in the Deployment take precedence.
+  existingConfigMap: ""
+  key: config.yaml
+  # Restart the Deployment after changing a subPath-mounted config file.
+
+imageMode: proxy_cache
+imageCacheMaxMB: 512
+logLevel: info
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi

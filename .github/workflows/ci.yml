@@ -45,6 +45,9 @@ jobs:
       - name: go test
         run: go test -race -count=1 ./...
 
+      - name: Theater HTTP compatibility assertions
+        run: python3 scripts/dev/probe_theater.py --ci
+
   lint:
     name: golangci-lint
     runs-on: ubuntu-latest

@@ -1,0 +1,43 @@
+version: 2
+project_name: fakemby
+# Do not clean the repository's existing dist/ runtime files.
+dist: dist/release
+
+builds:
+  - id: fakemby
+    main: ./cmd/fakemby
+    binary: fakemby
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -mod=readonly
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: fakemby
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - CHANGELOG.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  sort: asc
+
+release:
+  name_template: "FakEmby {{ .Tag }}"
+  prerelease: auto
+  # The workflow packages the chart with the same version as the release.
+  extra_files:
+    - glob: dist/charts/fakemby-*.tgz

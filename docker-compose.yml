@@ -1,82 +1,67 @@
-version: '3.8'
-
 services:
   fakemby:
+    image: ${FAKEMBY_IMAGE:-fakemby:local}
     build:
       context: .
       dockerfile: Dockerfile
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
 
-    container_name: fakemby
-
-    # 端口映射
     ports:
-      - "8096:8096"
-
-    # 卷挂载（数据持久化）
+      - "${FAKEMBY_BIND_ADDRESS:-127.0.0.1}:${FAKEMBY_PUBLISHED_PORT:-8096}:8096"
     volumes:
-      # 数据库存储
-      - ./data/db:/app/data
-      # 图片缓存
-      - ./data/cache:/app/data/cache
-      # 日志
-      - ./logs:/app/logs
-      # 配置文件（可选：覆盖默认配置）
-      - ./config.yaml:/app/config.yaml:ro
+      # A fresh named volume inherits UID/GID 10001 from the image.
+      # Before upgrading, migrate the old bind-mounted database (see CHANGELOG).
+      - fakemby-data:/app/data
+      # Optional configuration; environment values below take precedence.
+      # - ./config.yaml:/app/config.yaml:ro
 
-    # 环境变量（可覆盖配置文件中的值）
-    # M0-8：viper 前缀为 FAKEMBY_，嵌套键用下划线连接（server.port -> FAKEMBY_SERVER_PORT）
     environment:
-      # 日志级别
-      FAKEMBY_LOG_LEVEL: "info"
-
-      # 数据库配置
-      FAKEMBY_DATABASE_PATH: "/app/data/fakemby.db"
-      FAKEMBY_DATABASE_WAL_MODE: "true"
-
-      # 服务器配置
+      CONFIG_FILE: /app/config.yaml
       FAKEMBY_SERVER_HOST: "0.0.0.0"
       FAKEMBY_SERVER_PORT: "8096"
-      FAKEMBY_SERVER_NAME: "FakEmby Server"
+      FAKEMBY_SERVER_NAME: "${FAKEMBY_SERVER_NAME:-FakEmby Server}"
+      # Emby protocol compatibility version, not the application release version.
       FAKEMBY_SERVER_VERSION: "4.8.0.0"
-
-      # 认证配置
-      FAKEMBY_AUTH_TOKEN_EXPIRY_DAYS: "30"
-
-      # 图片配置
-      FAKEMBY_IMAGE_MODE: "redirect"          # redirect 或 proxy_cache
-      FAKEMBY_IMAGE_CACHE_DIR: "/app/data/cache/images"
-      FAKEMBY_IMAGE_CDN_PREFIX: ""
-
-      # 播放配置（sign_key 留空时启动会生成临时随机密钥，生产请固定）
+      FAKEMBY_DATABASE_PATH: /app/data/fakemby.db
+      FAKEMBY_DATABASE_WAL_MODE: "true"
+      FAKEMBY_AUTH_TOKEN_EXPIRY_DAYS: "${FAKEMBY_AUTH_TOKEN_EXPIRY_DAYS:-30}"
+      FAKEMBY_IMAGE_MODE: "${FAKEMBY_IMAGE_MODE:-proxy_cache}"
+      FAKEMBY_IMAGE_CACHE_DIR: /app/data/cache/images
+      FAKEMBY_IMAGE_CACHE_MAX_MB: "${FAKEMBY_IMAGE_CACHE_MAX_MB:-512}"
       FAKEMBY_PLAYBACK_REDIRECT: "true"
-      FAKEMBY_PLAYBACK_SIGN_KEY: ""
-      FAKEMBY_PLAYBACK_SIGN_TTL: "3600"
+      FAKEMBY_PLAYBACK_SIGN_TTL: "${FAKEMBY_PLAYBACK_SIGN_TTL:-3600}"
+      # Export these from the shell or a secret manager before running Compose.
+      # No *_FILE/config secret_file support exists. Never commit secret values.
+      # Environment values are visible to Docker administrators; do not share
+      # rendered `docker compose config` output containing production secrets.
+      FAKEMBY_ADMIN_API_KEY: "${FAKEMBY_ADMIN_API_KEY:?Export a strong FAKEMBY_ADMIN_API_KEY}"
+      FAKEMBY_PLAYBACK_SIGN_KEY: "${FAKEMBY_PLAYBACK_SIGN_KEY:?Export a persistent FAKEMBY_PLAYBACK_SIGN_KEY}"
+      FAKEMBY_LOG_LEVEL: "${FAKEMBY_LOG_LEVEL:-info}"
+      # The logger always writes stderr; disable the additional file sink.
+      FAKEMBY_LOG_FILE: /dev/null
 
-      # 管理员配置（留空则管理接口拒绝所有请求，必须设置）
-      FAKEMBY_ADMIN_API_KEY: ""
-
-      # TMDb 配置（可选）
-      FAKEMBY_TMDB_API_KEY: ""
-      FAKEMBY_TMDB_LANGUAGE: "zh-CN"
-      FAKEMBY_TMDB_IMAGE_BASE: "https://image.tmdb.org/t/p/original"
-
-    # 重启策略
     restart: unless-stopped
-
-    # 资源限制（可选）
-    # deploy:
-    #   resources:
-    #     limits:
-    #       cpus: '2'
-    #       memory: 512M
-    #     reservations:
-    #       cpus: '1'
-    #       memory: 256M
-
-    # 健康检查
+    stop_grace_period: 30s
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8096/emby/System/Info/Public"]
+      # Use GET, not wget --spider (HEAD); only GET is registered by the app.
+      test: ["CMD", "wget", "-q", "-T", "3", "-O", "/dev/null", "http://127.0.0.1:8096/readyz"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
       start_period: 40s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  fakemby-data:

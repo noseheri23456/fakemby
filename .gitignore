@@ -1,5 +1,5 @@
 # 构建产物
-fakemby
+/fakemby
 fakemby.exe
 build_test.exe
 *.exe

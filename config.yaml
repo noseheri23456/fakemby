@@ -36,11 +36,6 @@ admin:
   # 可用 FAKEMBY_ADMIN_API_KEY 环境变量覆盖。
   api_key: ""
 
-tmdb:
-  api_key: ""
-  language: "zh-CN"
-  image_base: "https://image.tmdb.org/t/p/original"
-
 log:
   level: "info"
   # 留空则只输出到 stderr

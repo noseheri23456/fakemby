@@ -1,43 +1,51 @@
-# 多阶段编译：Builder 和 Runtime
-FROM golang:1.26-alpine AS builder
+# syntax=docker/dockerfile:1
+ARG GO_VERSION=1.26.3
+ARG ALPINE_VERSION=3.22
 
-# 安装编译依赖
-RUN apk add --no-cache git ca-certificates tzdata
-
-# 设置工作目录
+FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine AS builder
+ARG TARGETOS
+ARG TARGETARCH
 WORKDIR /build
 
-# 复制项目文件
-COPY . .
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+# Copy only build inputs, never local configuration, databases, or credentials.
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -mod=readonly -trimpath -ldflags="-s -w" -o /out/fakemby ./cmd/fakemby
 
-# 构建二进制文件（无 CGO，避免 SQLite 依赖系统 C 库）
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o fakemby ./cmd/fakemby
+FROM alpine:${ALPINE_VERSION} AS runtime
+ARG VERSION=dev
+ARG REVISION=unknown
+RUN apk add --no-cache ca-certificates tzdata \
+    && addgroup -S -g 10001 fakemby \
+    && adduser -S -D -H -u 10001 -G fakemby fakemby \
+    && mkdir -p /app/data/cache/images \
+    && chown -R 10001:10001 /app/data \
+    && chmod 0750 /app/data
 
-# 运行时镜像：使用 alpine 保持镜像小
-FROM alpine:latest
-
-# 安装运行时依赖（仅 ca-certificates 用于 HTTPS）
-RUN apk add --no-cache ca-certificates tzdata
-
-# 创建应用目录
 WORKDIR /app
+COPY --from=builder /out/fakemby /usr/local/bin/fakemby
+# No config file is required: the application supports defaults plus environment.
+# The optional file log is discarded; the existing logger always writes stderr.
+ENV CONFIG_FILE=/app/config.yaml \
+    FAKEMBY_SERVER_HOST=0.0.0.0 \
+    FAKEMBY_SERVER_PORT=8096 \
+    FAKEMBY_DATABASE_PATH=/app/data/fakemby.db \
+    FAKEMBY_IMAGE_CACHE_DIR=/app/data/cache/images \
+    FAKEMBY_LOG_FILE=/dev/null
 
-# 从 builder 阶段复制二进制文件
-COPY --from=builder /build/fakemby .
-
-# 复制默认配置
-COPY --from=builder /build/config.yaml .
-
-# 创建数据目录
-RUN mkdir -p /app/data /app/data/cache/images /app/logs
-
-# 暴露端口
+USER 10001:10001
 EXPOSE 8096
+STOPSIGNAL SIGTERM
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD wget -q -T 3 -O /dev/null "http://127.0.0.1:${FAKEMBY_SERVER_PORT}/readyz" || exit 1
+ENTRYPOINT ["/usr/local/bin/fakemby"]
 
-# 运行应用
-ENTRYPOINT ["./fakemby"]
-
-# 标签
 LABEL org.opencontainers.image.title="FakEmby" \
       org.opencontainers.image.description="Lightweight Emby-compatible media server" \
-      org.opencontainers.image.version="1.0.0"
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}"

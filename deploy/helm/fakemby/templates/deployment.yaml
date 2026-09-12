@@ -1,0 +1,129 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "fakemby.fullname" . }}
+  labels:
+    {{- include "fakemby.labels" . | nindent 4 }}
+spec:
+  # Do not scale SQLite horizontally or run two writers during upgrades.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "fakemby.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "fakemby.selectorLabels" . | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: fakemby
+          image: {{ printf "%s:%s" .Values.image.repository (.Values.image.tag | default .Chart.AppVersion) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          ports:
+            - name: http
+              containerPort: 8096
+              protocol: TCP
+          env:
+            - name: CONFIG_FILE
+              value: /app/config.yaml
+            - name: FAKEMBY_SERVER_HOST
+              value: "0.0.0.0"
+            - name: FAKEMBY_SERVER_PORT
+              value: "8096"
+            - name: FAKEMBY_DATABASE_PATH
+              value: /app/data/fakemby.db
+            - name: FAKEMBY_DATABASE_WAL_MODE
+              value: "true"
+            - name: FAKEMBY_IMAGE_CACHE_DIR
+              value: /app/data/cache/images
+            - name: FAKEMBY_IMAGE_MODE
+              value: {{ .Values.imageMode | quote }}
+            - name: FAKEMBY_IMAGE_CACHE_MAX_MB
+              value: {{ .Values.imageCacheMaxMB | quote }}
+            - name: FAKEMBY_LOG_LEVEL
+              value: {{ .Values.logLevel | quote }}
+            # The existing logger writes stderr even with a discarded file sink.
+            - name: FAKEMBY_LOG_FILE
+              value: /dev/null
+            - name: FAKEMBY_ADMIN_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "secrets.existingSecret is required" .Values.secrets.existingSecret | quote }}
+                  key: {{ required "secrets.adminAPIKeyKey is required" .Values.secrets.adminAPIKeyKey | quote }}
+            - name: FAKEMBY_PLAYBACK_SIGN_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret | quote }}
+                  key: {{ required "secrets.playbackSignKeyKey is required" .Values.secrets.playbackSignKeyKey | quote }}
+          # Readiness checks the database; liveness checks the process.
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.config.existingConfigMap }}
+            - name: config
+              mountPath: /app/config.yaml
+              subPath: config.yaml
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (include "fakemby.fullname" .) | quote }}
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+        {{- if .Values.config.existingConfigMap }}
+        - name: config
+          configMap:
+            name: {{ .Values.config.existingConfigMap | quote }}
+            items:
+              - key: {{ .Values.config.key | quote }}
+                path: config.yaml
+        {{- end }}
