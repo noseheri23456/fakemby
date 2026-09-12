@@ -1,10 +1,10 @@
 # FakEmby 继续开发方案
 
-> 版本：v1.2 ｜ 编制日期：2026-09-11 ｜ 最近更新：2026-09-12
+> 版本：v1.9 ｜ 编制日期：2026-09-11 ｜ 最近更新：2026-09-13
 > 适用对象：本仓库当前代码基线（master，tag `v0.9.0-pre`）
 > 目标：把「能跑通的 Emby 兼容层」推进为「可公开部署、可长期维护的产品级服务」
 >
-> **进度：M0 已完成并通过验收（26/26）；M1 已完成（service 71% / signer 96% 覆盖）；M2 已完成（M2-3~M2-8 六项落地，M2-1/M2-2 结构性重构留待后续）；M3 已编制（≈10 天）——v1.4 移除刮削器需求，主线改为「官方客户端兼容基线」。详见 §10 执行记录与 §7 不做清单。**
+> **进度：M0 已完成并通过验收（26/26）；M1 已完成（service 71% / signer 96% 覆盖）；M2 已完成（M2-3~M2-8 六项落地，M2-1/M2-2 结构性重构留待后续）；M3 九项中八项已完成（M3-2~M3-9），仅 M3-1 剩「log 驱动轨迹」，且**整轮修复尚待一次完整用户实测**——v1.4 移除刮削器需求，主线改为「官方客户端兼容基线」；M4 七项中 M4-3（发布工程）与 M4-4（Helm chart + compose 加固）已完成并进入 CHANGELOG `Unreleased`，其余 M4-1/2/5/6/7 待做。详见 §10 执行记录与 §7 不做清单。**
 
 ---
 
@@ -196,37 +196,48 @@ internal/
 > 本里程碑由「堆功能」调整为「**让真实官方客户端跑通全流程**」——M2 结束后实测发现，
 > 端点数量不是瓶颈，**客户端对响应字段的零容错**才是（详见 §10 的兼容实战记录）。
 
+**进度总览（v1.8）**：9 项中 **8 项已完成**，仅 **M3-1 剩「log 驱动轨迹」一项**收尾。
+已完成项里有一半是「复核后发现早已实现、本轮只补缺口」（M3-3/4/5/6/7/8 都属此类），
+详见各条目的「v1.x 实况复核」与 §12 修订记录。
+
 | ID | 任务 | 说明 | 验收标准 |
 |----|------|------|----------|
-| M3-1 ⏳ | **官方客户端兼容基线**（最高优先级） | ① 把真实客户端的请求序列固化成回归资产：解析 `dist/server.log` 得到「登录→首页→点磁贴→进库→点条目→详情→播放」的请求轨迹，生成断言用例；② **响应字段安全审计**：客户端对数组/对象字段存在大量裸调用（`.length`/`.includes`/`.filter`），凡被裸调用的字段服务端必须恒返回 `[]`/`{}` 而非缺失或 `null`，逐条补契约测试；③ 已修必补项（`System/Endpoint`、`User.Configuration` 全字段、条目详情支持媒体库 ID、`RequiredHttpHeaders`）全部钉死为回归用例 | Emby Theater 3.0.20 全流程无 `Content no longer available`；`scripts/dev/probe_theater.py` 升级为可断言套件并进 CI |
-| M3-2 | **补齐缺失端点**（按实测差异排序） | **v1.6 复核：v1.4 列的 6 个「实测 404」里 5 个其实已随 M2 重构落地**（`NextUp`、`Items/Filters`、`Channels`、`Genres`、`Studios` 均 200），真正缺的只剩 `LiveTv/Channels`。本轮实测又发现 3 个**契约形态**问题（不是 404 但同样会崩）：`Ancestors` 因 nil 切片返回 `null`、`QuickConnect/Enabled` 返回裸布尔而非 `{"Enabled":false}`、`LiveTv/Channels` 404。均已修。次要项：`/Genres`、`/Studios`、`/Persons/{id}`、`/Items/{id}/Intros`、`/Playlists`、`/Collections` 已实现（可返回空集合） | 首页/详情页/库浏览三个场景无 404；列表端点返回结构正确（允许空） |
+| M3-1 ⏳ | **官方客户端兼容基线**（最高优先级） | **v1.8 状态：②③ 已完成，仅剩 ①**。② 响应字段安全审计已落成总闸 `internal/emby/nullsafety_test.go`（递归扫描 25 个面向客户端端点断言无 `null`，白名单须逐字段拿客户端源码举证）+ 审计工具 `scripts/dev/audit_client_fields.py`（HIGH 风险退出码 1，不进 CI——依赖本机 Theater 源码）；③ `System/Endpoint`、`User.Configuration` 全字段、条目详情支持媒体库 ID、`RequiredHttpHeaders` 均已修并钉死为回归用例。**剩 ①**：把真实客户端的请求序列固化成回归资产——解析 `dist/server.log` 得到「登录→首页→点磁贴→进库→点条目→详情→播放」的请求轨迹并生成断言用例（`probe_theater.py` 已是可断言套件但走的是预设序列，不是解析真实日志） | Emby Theater 3.0.20 全流程无 `Content no longer available`；`scripts/dev/probe_theater.py` 升级为可断言套件并进 CI |
+| M3-2 ✅ | **补齐缺失端点**（按实测差异排序） | **v1.6 复核：v1.4 列的 6 个「实测 404」里 5 个其实已随 M2 重构落地**（`NextUp`、`Items/Filters`、`Channels`、`Genres`、`Studios` 均 200），真正缺的只剩 `LiveTv/Channels`。本轮实测又发现 3 个**契约形态**问题（不是 404 但同样会崩）：`Ancestors` 因 nil 切片返回 `null`、`QuickConnect/Enabled` 返回裸布尔而非 `{"Enabled":false}`、`LiveTv/Channels` 404。均已修。次要项：`/Genres`、`/Studios`、`/Persons/{id}`、`/Items/{id}/Intros`、`/Playlists`、`/Collections` 已实现（可返回空集合） | 首页/详情页/库浏览三个场景无 404；列表端点返回结构正确（允许空） |
 | M3-3 ✅ | **真实 WebSocket**（修 A8） | **v1.7 实况复核：gorilla/websocket 的帧收发、ping/pong 心跳、按用户广播在之前的历史提交里其实已经落地**，本轮做的是把它补成「能扛真实客户端」的形态：① **订阅协议**——官方客户端 `onopen` 后补发 `<Name>Start`（Data 是 `"0,1500,0,true,true"` 这类字符串）并期望同名首帧，原先完全不回包，客户端只能退化成定时轮询；现 `Sessions` 回该用户会话快照、`ScheduledTasksInfo`/`ActivityLogEntry` 回空数组（不能是 `null`）；② **业务事件补全**——已看/收藏也推 `UserDataChanged`（原先只有播放进度推），`Sessions` 快照里的 `PlayableMediaTypes`/`SupportedCommands`/`AdditionalUsers` 初始化为空切片（客户端裸调 `.includes`）；③ **健壮性**——连接上限（超出 503）、队列满计数而非阻塞、建连下发 `ForceKeepAlive`、关闭时先发 `ServerShuttingDown` 再发 1001 关闭帧、心跳参数可配（测试压到 50ms）；④ 顺带修掉一个**自死锁**：播放上报持 `activeSessionsMu` 写锁时回调了会取读锁的 `userSessions`，任何一次进度上报都会把整个请求挂死 | `go test ./internal/infra/ws/ ./internal/emby/` 全绿；Emby Theater 连接后不再轮询（日志里 `/emby/Sessions` 周期性请求消失） |
 | M3-4 ✅ | **签名与防盗链闭环**（接 M0-7） | **v1.8 实况复核：清单里三件事（IP 绑定、`redirect_mode` 灰度、逐前缀切换）在 M0-7 就实现了**，本轮补的是①**修一个 fail-open 级实现偏差**：`ShouldSign` 注释与 `CONFIGURATION.md:50` 都写「`sign_prefixes` 为空 = 全部签名」，代码却在末尾 `return false`——而两份 `config.yaml` 的出厂默认值正是 `[]`，等于**默认所有播放直链都不带签名，防盗链形同虚设**（自 M0-7 提交 65d83c0 起）。已改为空列表返回 `true`；②新增约束：密钥为空或仍是出厂默认值时**不签名**——用空 key 签出的是谁都能伪造的「假签名」，比不签名更危险；③**签名审计日志**：原先只有失败才 `Warn`，成功签发与校验成功完全无痕，无法区分「没人盗链」和「签名根本没生效」。现 `auditSignature` 统一打点 `issue`/`verify_ok`/`verify_fail`/`verify_rejected`，含 item/source/uid/ip/exp/mode，**不打 sig 本身**。判定优先级：`plain` 总开关 > `plain_prefixes`（逐前缀免签）> `sign_prefixes`（空=全签） | `go test ./internal/config/ ./internal/emby/` 全绿；默认配置下直链带 `sig` 且能被 `/api/auth/verify` 认回，篡改 `item_id` 后 401；`plain` 模式下不带签名 |
-| M3-5 | **搜索增强** | 现仅 `Search/Hints`。加拼音/别名匹配、按类型加权、结果高亮字段。**拼音走本地库或自建映射表，不引入任何在线查询** | 中文标题模糊搜索命中率提升 |
+| M3-5 ✅ | **搜索增强** | **v1.8 实况复核：已完成**（`internal/service/search.go`）。分级打分：完全相等 100 / 名称前缀 80 / 名称包含 60 / `OriginalTitle`+`Tags` 别名 50 / **拼音全拼或首字母** 40 / 简介 10；再按类型加权（`Movie`/`Series` +5、`Episode` +2），同分按名称、ID 稳定排序。**拼音走 `github.com/mozillazg/go-pinyin` 本地库，无任何在线查询**（符合 §5 原则 4）。另有 `HighlightName`（先 HTML 转义再插 `<mark>`，防 XSS）与 `FindSimilarItems`（按流派/年份/类型）。回归见 `internal/service/roadmap_test.go` 的 `TestRoadmapPinyinAliasesAndHighlight` | 中文标题「流浪地球」可经 `liulangdiqiu` / `lldq` 命中；高亮输出始终是转义后的安全 HTML |
 | M3-6 ✅ | **多用户策略生效** | **v1.7 实况复核：清单里要做的三件事早就做完了**——`internal/access` 已实现按库访问控制（EnabledFolders/BlockedMediaFolders，黑名单优先）、家长分级（MaxParentalRating + BlockUnratedItems）、并发会话数限制（SimultaneousStreamLimit → 429），而且是**递归 SQL CTE** 实现的：祖先被拒则所有后代（含未分级子集）一并拒绝，策略解析失败即 `1=0` 全拒（fail-closed）。本轮补的是**「DTO 与 enforcement 脱节」**这一真实缺口：① `MaxParentalRating`/`BlockUnratedItems` enforcement 一直在用，但 `UserPolicy` DTO 没暴露——官方客户端「GET 用户 → 改开关 → POST 回 `/emby/Users/{id}/Policy`」的往返会把它们静默清空，而**清空家长分级是放开限制而不是收紧**（fail-open）；② `POST /emby/Users/{id}/Policy` 落盘前不校验，写坏的策略在 enforcement 侧等于全拒、管理 UI 却显示默认值，排障无从下手——现在用 `access.Normalize` 校验，非法返回 400；③ `internal/access` 这个最关键的包**此前零测试**，补了 7 组单测（Normalize 严格性、黑白名单、分级边界、SessionLimit） | `go test ./internal/access/ ./internal/emby/` 全绿；`Policy` 往返后家长分级无损；非法策略 400 |
-| M3-7 | **批量导入增强** | 增量更新（按 `Id` 或 `ProviderIds` 幂等 upsert，不再依赖外部 ID 抓取）、导入前校验、dry-run、失败重试 | 重复导入同一批数据不产生重复条目 |
-| M3-8 | 数据与配置导出/导入 | `fakemby export` / `import` 子命令，产出可迁移 JSON 快照 | 换机迁移 5 分钟完成 |
+| M3-7 ✅ | **批量导入增强** | **v1.8 实况复核：已完成**（`internal/api/admin/import.go`）。① **幂等 upsert**：`resolveImportIdentity` 按 `Id` 或 `ProviderIds` 解析，无 `Id` 时用 `importStableID`（sha256 of library/type/parent/identity）派生稳定 ID——identity 依次取 ProviderIds、`season:N`/`episode:N`、或 `名称:年份`；匹配到多个即报「ambiguous」而非静默合并。② **导入前校验**：`validateImportTree` 覆盖树形结构、单批 1000 项 / 总计 5000 节点上限、URL 必须绝对 HTTP(S) 且**不得内嵌凭据**、分级与评分范围、ISO 8601 日期。③ **dry-run**：body 与 query 两处开关取或，**任何一处为真即不写库**（不能被另一处覆盖）。④ **失败重试**：每个 item 走 `SAVEPOINT` 逐条回滚，整树要么全成要么全退；`SQLITE_BUSY/LOCKED` 退避重试 3 次。⑤ 更新语义：`sources`/`images`/`subtitles` 数组以本次为权威全量替换，**播放进度与 DateCreated 不动**。回归见 `internal/emby/import_test.go` 6 组 | 重复导入同一批数据不产生重复条目；改名后重导入仍解析到同一 ID 且进度保留 |
+| M3-8 ✅ | 数据与配置导出/导入 | **v1.8 实况复核：已完成**。`fakemby export` / `import SNAPSHOT.json` 子命令在 `cmd/fakemby/commands.go`，实现在 `internal/transfer/snapshot.go`（`Export`/`Import`/`Snapshot.Validate`），产出含条目、库、用户与配置的可迁移 JSON 快照；`Validate` 先做版本校验，**版本不符直接不写库**。回归见 `internal/transfer/snapshot_test.go`（往返一致 + 非破坏性恢复 + 非法版本不写） | 换机迁移 5 分钟完成 |
 | M3-9 ✅ | **刮削器预留清理** | 删除配置/文档里「已预留但无实现」的刮削残留：`config.yaml` 与 `dist/config.yaml` 的 `tmdb:` 段、`docker-compose.yml` 的 `FAKEMBY_TMDB_*`、`CLAUDE.md`/`ARCHITECTURE.md` 的 tmdb 描述。**`ProviderIds`（IMDB/TMDB/TVDB）作为外部 ID 字段保留**——只存标识、不发起抓取 | 全仓库 `grep -ri tmdb` 只剩 ProviderIds 相关说明；符合 §5 原则 4「文档写了没实现就删掉」 |
 
-**M3 完成判据**：
-1. 官方 Emby Theater 走通「登录 → 首页 → 媒体库 → 条目详情 → 播放 → 进度回写」全链路，无报错页；
-2. M3-1 的兼容回归套件进 CI 且全绿（`go test -race ./...` 无失败）；
-3. 小幻影视 / SenPlayer / RodelPlayer 三端回归清单（§6）全勾选；
-4. `grep -ri "tmdb\|刮削"` 在代码与配置中无残留实现承诺。
+**M3 完成判据**（v1.8 核对后的达成情况）：
+1. ⏳ **待实测**：官方 Emby Theater 走通「登录 → 首页 → 媒体库 → 条目详情 → 播放 → 进度回写」全链路，无报错页。
+   —— M3-1~M3-6 的修复**至今未经过一轮完整用户实测**（自用户报「问题依旧」后一直没再验证），
+   这是 M3 收尾的真正瓶颈，不是代码量。
+2. ✅ 已达成：兼容回归套件进 CI（`.github/workflows/ci.yml:49` 跑 `probe_theater.py --ci`）；
+   `go test -race ./...` 本地全绿。
+3. ⏳ 待实测：小幻影视 / SenPlayer / RodelPlayer 三端回归清单（§6）。
+4. ✅ 已达成：`grep -ri tmdb` 在代码与配置中只剩 `TMDBID` / `tmdb` 作为 **ProviderIds 标识字段**，
+   无任何抓取实现承诺（M3-9）。
 
 ---
 
 ### M4 · 可运维与生态（≈ 10 天）
 
+> **v1.9 状态：M4-3（发布工程）与 M4-4（部署形态：Helm chart + compose 加固）已完成并进入 CHANGELOG `Unreleased`**，
+> 其余 M4-1/2/5/6/7 待做。落地要点见 §10「M4 执行记录」。
+
 | ID | 任务 | 说明 |
 |----|------|------|
-| M4-1 | **Web 管理后台** | 内嵌静态页面（或独立前端），覆盖：条目 CRUD、批量导入、用户管理、播放源管理、系统状态。这是目前最大的易用性缺口 |
-| M4-2 | 可观测性 | `/healthz`、`/metrics`（Prometheus）、结构化 JSON 日志、请求 trace id |
-| M4-3 | 发布工程 | 多架构镜像（amd64/arm64）、GitHub Release + goreleaser、语义化版本、CHANGELOG |
-| M4-4 | 部署形态 | K8s Helm chart / 更严谨的 compose（secrets 管理、非 root 用户、只读根文件系统） |
-| M4-5 | 网盘适配器 | 抽象 `SourceResolver` 接口：115 / OpenList / Alist / 直链；统一处理带 Referer/UA/签名鉴权的源 |
-| M4-6 | strm 支持 | 媒体源为 `.strm` 时读取内部 URL 再重定向；支持本地 strm 目录扫描 |
-| M4-7 | 数据库可选项 | 抽象 dialect，支持 Postgres/MySQL（大库场景 sqlite 会吃力） |
+| M4-1 ⏳ | **Web 管理后台** | 内嵌静态页面（或独立前端），覆盖：条目 CRUD、批量导入、用户管理、播放源管理、系统状态。这是目前最大的易用性缺口 |
+| M4-2 ⏳ | 可观测性 | `/healthz`、`/metrics`（Prometheus）、结构化 JSON 日志、请求 trace id |
+| M4-3 ✅ | 发布工程 | **v1.9 完成**：GoReleaser v2 多架构发布归档（amd64/arm64）+ SHA-256 校验和；tag 触发的 release workflow 向 `ghcr.io/<owner>/<repo>` 推送多平台镜像（先校验 Go 测试 / GoReleaser / Compose / Helm，PR 与手动运行只做校验）；语义化版本与 CHANGELOG 约定已写入仓库；Helm chart 作为发布资产随 GitHub Release 附带 |
+| M4-4 ✅ | 部署形态 | **v1.9 完成**：极简 Helm chart（Service、保留的 SQLite PVC 或既有 claim、引用既有 Secret、可选 ConfigMap、就绪/存活/启动探针、受限 pod/容器安全上下文）；compose 加固为只读根文件系统 + drop 全部 capabilities + no-new-privileges + 有界 tmpfs + 轮转日志 + 持久命名卷、默认 loopback 绑定（设 `FAKEMBY_BIND_ADDRESS` 开放）；Docker 构建用 Go 1.26.3 + BuildKit 目标平台参数，运行镜像 UID/GID 10001、仅含二进制与运行时包；secrets 改由 `FAKEMBY_ADMIN_API_KEY` / `FAKEMBY_PLAYBACK_SIGN_KEY` 注入，删除占位凭据与无用 scraper env |
+| M4-5 ⏳ | 网盘适配器 | 抽象 `SourceResolver` 接口：115 / OpenList / Alist / 直链；统一处理带 Referer/UA/签名鉴权的源 |
+| M4-6 ⏳ | strm 支持 | 媒体源为 `.strm` 时读取内部 URL 再重定向；支持本地 strm 目录扫描 |
+| M4-7 ⏳ | 数据库可选项 | 抽象 dialect，支持 Postgres/MySQL（大库场景 sqlite 会吃力） |
 
 ---
 
@@ -374,7 +385,7 @@ FAKEMBY_SERVER_PORT=9999 ./fakemby &   # 期望监听 9999
 | M0-4 | ✅ | `DirectStreamUrl` 不再拼 `api_key`；登录请求体 Info 日志与 Basic Auth base64 日志删除；`/debug/auth` 仅 `log.level=debug` 时注册 |
 | M0-5 | ✅ | 新增 `RequireUserMatch(param)` 中间件，覆盖 Views/Folders/Items/Items:Latest/Users:userId/userdata 全部读写入口 |
 | M0-6 | ✅ | `server.cors_origins`（空=同源、`*` 强制无凭据）；`/emby/Users/Public` 改用 `PublicUserDTO`（去掉 IsAdmin/Policy） |
-| M0-7 | ✅ | 新增 `internal/infra/signer`（HMAC-SHA256，`type|item|source|user|index` + exp）+ `/api/auth/verify`；`playback.sign_prefixes` 控制作用范围 |
+| M0-7 | ✅ | 新增 `internal/infra/signer`（HMAC-SHA256，`type\|item\|source\|user\|index` + exp）+ `/api/auth/verify`；`playback.sign_prefixes` 控制作用范围 |
 | M0-8 | ✅ | `SetEnvKeyReplacer` + 逐键 `BindEnv`；`CONFIG_FILE` / `-config`；配置文件缺失回落默认值并告警；`logging.Setup` 接通 level/file；`PrepareRuntime` 调 `EnsureSignKey`/`EnsureLogDir`/`EnsureCacheDir` |
 | M0-9 | ✅ | 所有 `AuthTokenMiddleware(30)` 改为 `cfg.Auth.TokenExpiryDays`（items/shows/playback/search/sessions/stats/userdata/users） |
 | M0-10 | ✅ | `config.yaml` 端口 8096；docker-compose 环境变量补 `FAKEMBY_` 前缀；Dockerfile builder 1.22→1.26（go.mod 要求 1.26.3，原先镜像根本构建不出来）；README 的 Go 版本/镜像体积/CLAUDE.md 死链已修 |
@@ -662,7 +673,56 @@ M3 期间若再现需专项排查。
 
 ---
 
+### M4 · 发布工程与部署形态（2026-09-13，对应 CHANGELOG `Unreleased`）
+
+> 来源：`CHANGELOG.md` 的 `[Unreleased]` 段。本轮工作尚未打 release tag，
+> 故记为「已完成（Unreleased）」——代码与 CI 已落地，镜像/归档要等正式 tag 才发布。
+
+#### M4-3 发布工程 · 已完成
+
+| 项 | 落地要点 |
+|----|----------|
+| 发布归档 | GoReleaser v2 产出 Linux amd64/arm64 归档 + SHA-256 校验和；版本化 Helm chart 作为 GitHub Release 资产附带 |
+| 镜像发布 | tag 触发的 release workflow 向 `ghcr.io/<repository-owner>/<repository-name>` 推送多平台镜像；发布前校验 Go 测试 / GoReleaser 配置 / Compose / Helm；PR 与手动运行只做校验 |
+| 发布约定 | 语义化版本 `vMAJOR.MINOR.PATCH` 或带 `-PRERELEASE`；tag 前把 Unreleased 条目移入带日期的版本段；`server.version` 与发布版本分离；`latest` 仅稳定版更新；workflow 权限来自仓库而非硬编码上游账号 |
+
+**本地校验命令**（非密钥值）：`goreleaser check`、`helm lint --strict deploy/helm/fakemby`、
+`helm template fakemby deploy/helm/fakemby`、`docker compose config --quiet`。
+GoReleaser 产物写入 `dist/release`（与运行时 `dist` 分离），chart 单独打包在 `dist/charts`。
+
+#### M4-4 部署形态（Helm chart + compose 加固）· 已完成
+
+| 项 | 落地要点 |
+|----|----------|
+| Helm chart | 极简 chart：Service、保留的 SQLite PVC（或 `persistence.existingClaim` 既有 claim）、引用既有 Secret（`secrets.existingSecret`，默认 `fakemby-secrets`，键 `admin-api-key`/`playback-sign-key`）、可选 `config.existingConfigMap`、就绪/存活/启动探针、受限 pod/容器安全上下文（非 root、drop capabilities、readOnlyRootFilesystem） |
+| 副本与升级 | `replicas` 固定 1、`strategy: Recreate`；自建 PVC 卸载保留；禁止扩副本或与其他 release 共享 SQLite 卷；`fsGroup` 须让 UID/GID 10001 可写 |
+| Compose 加固 | 只读根文件系统 + drop 全部 capabilities + no-new-privileges + 有界 tmpfs + 轮转容器日志 + 持久命名卷；默认 loopback 绑定，`FAKEMBY_BIND_ADDRESS` 显式设才开放 LAN/反代 |
+| Docker 构建 | Go 1.26.3 + BuildKit 目标平台参数（不再强制 amd64）；运行镜像 UID/GID 10001，仅含二进制与运行时包，不含仓库配置与本地数据 |
+| Secrets | `FAKEMBY_ADMIN_API_KEY` / `FAKEMBY_PLAYBACK_SIGN_KEY` 须由 shell 或密钥管理器提供，不再随镜像带占位凭据；删除无用 scraper env；应用**不**支持 `secret_file`/`*_FILE`，挂密钥文件不会生效 |
+| 日志 | 容器文件日志重定向 `/dev/null`，应用日志仍写 stderr；DB 与图片缓存落在 `/app/data` |
+| 探针 | 复用既有 `GET /emby/System/Info/Public` 做 HTTP 就绪/存活检查（只验可达性，不谎称数据库就绪），未新增健康端点 |
+
+**升级 / 迁移须知（写进 CHANGELOG Deployment notes）**：
+
+1. 换存储前先备份 SQLite；停旧实例后把 `./data/db`（含 WAL 一致态）迁进新命名卷，归属改为 `10001:10001`；旧缓存可选、文件日志不再挂载。无自动迁移，空卷会新建库。
+2. `docker compose up --build -d` 前务必导出强且持久的两个必需变量；`.env` 含密钥勿提交、含凭据的渲染 Compose 勿分享。
+3. Helm 安装前在目标命名空间建 Secret（`admin-api-key`/`playback-sign-key` 非空）；轮换密钥或改 ConfigMap 后重启 Deployment。Values/history 不含密钥值。
+4. chart 的 `appVersion` 记历史基线，不保证该 tag 有镜像；从源码装须覆盖 `image.tag` 为已发布版本、fork 须覆盖 `image.repository`。
+
+**已知约束**：chart 固定单副本，`Recreate` 升级会短暂中断；SQLite 卷不可跨 release 共享。
+
+---
+
 ## 修订记录
+
+### v1.9（2026-09-13 CHANGELOG → ROADMAP 同步）
+
+1. **把 `CHANGELOG.md` `[Unreleased]` 段的改动同步进 ROADMAP**：主要对应 M4-3（发布工程）与 M4-4（部署形态）。
+2. **M4-3 标记完成**：GoReleaser v2 多架构归档 + SHA-256 校验和、tag 触发向 `ghcr.io` 推多平台镜像（发布前校验 Go 测试 / GoReleaser / Compose / Helm，PR 与手动仅校验）、语义化版本与 CHANGELOG 约定、Helm chart 作为发布资产。
+3. **M4-4 标记完成**：极简 Helm chart（Service / 保留 PVC / 既有 Secret / 可选 ConfigMap / 探针 / 受限安全上下文，固定单副本 + Recreate）+ compose 加固（只读根文件系统、drop capabilities、no-new-privileges、有界 tmpfs、轮转日志、持久命名卷、默认 loopback）+ Docker 用 Go 1.26.3 + BuildKit 目标平台、运行镜像 UID/GID 10001、仅含二进制与运行时包；secrets 改由 `FAKEMBY_ADMIN_API_KEY` / `FAKEMBY_PLAYBACK_SIGN_KEY` 注入，删占位凭据与无用 scraper env。
+4. **§10 新增「M4 执行记录」**：含 M4-3/M4-4 落地要点、升级/迁移须知（换存储先备份 SQLite、PVC 归属 10001:10001、Helm 安装前建 Secret、从源码装须覆盖 `image.tag`）、本地校验命令（`goreleaser check` / `helm lint --strict` / `docker compose config --quiet`）。
+5. 顶部进度行与版本号（v1.2→v1.9）更新为「M4 七项中 M4-3/M4-4 已完成，其余待做」；M4 任务表加 `✅`/`⏳` 状态标记。
+6. M4-3/M4-4 记为「已完成（Unreleased）」——代码与 CI 已落地，镜像/归档待正式 tag 才发布。
 
 ### v1.8（2026-09-13 M3-4 复核）
 
@@ -682,9 +742,16 @@ M3 期间若再现需专项排查。
    （`evil.com` 不得命中 `good.com` 前缀、`/vodfoo` 不得命中 `/vod`、带凭据 URL 一律拒绝）。
 5. 端到端契约测试 `internal/emby/signature_test.go`：断言 **HTTP 层真实行为**而非纯函数返回值
    （纯函数对了但没人调用它，等于没修），并覆盖签发→`/api/auth/verify` 认回→篡改 `item_id` 被拒的闭环。
-6. **M3-5 / M3-7 / M3-8 实况复核：均已实现**（拼音+首字母+按类型加权+高亮+别名；
-   幂等 upsert + dry-run + 导入前校验 + savepoint 重试；`fakemby export|import` 子命令），
-   本轮未改动。M3 仅剩 M3-1 的「log 驱动轨迹」收尾。
+6. **M3-5 / M3-7 / M3-8 实况复核：均已实现**，本轮按实测补写了条目内容并标记完成
+   （拼音+首字母+按类型加权+高亮+别名；幂等 upsert + dry-run + 导入前校验 + savepoint 重试；
+   `fakemby export|import` 子命令）。**打标前逐个确认了有测试背书**：M3-5 →
+   `TestRoadmapPinyinAliasesAndHighlight`；M3-7 → `internal/emby/import_test.go` 6 组
+   （含「改名后重导入仍解析到同一 ID、进度与 DateCreated 保留」）；M3-8 → 快照往返测试。
+   **M3-2 也一并标记完成**（v1.6 已修完 3 处契约问题）。
+7. **M3 完成判据加了达成状态**：① 与 ③ 待实测、② 与 ④ 已达成。
+   其中 ① 是 M3 收尾的真正瓶颈——M3-1~M3-6 的修复**至今没经过一轮完整用户实测**，
+   缺的不是代码而是验证。
+8. **M3 进度总览**：9 项中 8 项完成，剩 M3-1 一项收尾。
 
 ### v1.7（2026-09-13 凌晨 M3-3 + M3-6 复核）
 
