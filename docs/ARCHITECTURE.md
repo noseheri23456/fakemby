@@ -66,7 +66,10 @@ fakemby/
 
 Viper 加载 `config.yaml`，支持环境变量覆盖（如 `FAKEMBY_SERVER_PORT=9096`）。
 
-配置分段：`server`、`database`、`auth`、`image`、`playback`、`admin`、`tmdb`、`log`。
+配置分段：`server`、`database`、`auth`、`image`、`playback`、`admin`、`log`。
+
+> 无 `tmdb` 段：本项目不刮削、不发起任何在线元数据抓取。
+> `ProviderIds`（IMDB/TMDB/TVDB）只是导入方写入的标识字段。
 
 ### 2. 数据库
 
@@ -156,6 +159,7 @@ Library
 Telegram Bot ──POST /api/admin/import──→ FakEmby (Go:8096) ←── SQLite
                                               │
 Emby 客户端 ──GET /emby/Users/*/Items───────→ │
-             ──GET /emby/Items/*/Images/*──→ 302 → TMDb / CDN
+             ──GET /emby/Items/*/Images/*──→ 302 → 外部图床 / CDN
+             （或 `image.mode: proxy_cache` 时由服务端代取并缓存后自出图）
              ──GET /emby/Videos/*/stream──→ 302 (HMAC 签名) → OpenList → 115 / GDrive
 ```

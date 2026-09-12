@@ -55,11 +55,6 @@ admin:
                                # 留空或仍为出厂默认值 "change-me" 时，
                                # /api/admin/* 拒绝所有请求（401）
 
-tmdb:
-  api_key: ""                  # TMDb API Key（可选，用于元数据获取）
-  language: "zh-CN"            # TMDb 语言
-  image_base: "https://image.tmdb.org/t/p/original"
-
 log:
   level: "info"                # 日志级别：debug | info | warn | error
   file: ""                     # 日志文件路径，留空则只输出 stderr
@@ -151,7 +146,7 @@ SQLite 数据库，GORM AutoMigrate 自动创建/迁移。
 | `people` | TEXT | JSON 数组 `[{Name,Type,Role}]` |
 | `tags` | TEXT | JSON 数组 |
 | `taglines` | TEXT | JSON 数组 |
-| `tmdb_id` / `imdb_id` / `tvdb_id` | TEXT | 外部 ID |
+| `tmdb_id` / `imdb_id` / `tvdb_id` | TEXT | 外部 ID（仅作标识，服务端不会据此发起任何网络请求） |
 | `season_number` | INTEGER | 季号（Season 类型） |
 | `episode_number` | INTEGER | 集号（Episode 类型） |
 | `runtime_ticks` | INTEGER | 时长（100ns 单位） |

@@ -4,7 +4,7 @@
 > 适用对象：本仓库当前代码基线（master，tag `v0.9.0-pre`）
 > 目标：把「能跑通的 Emby 兼容层」推进为「可公开部署、可长期维护的产品级服务」
 >
-> **进度：M0 已完成并通过验收（26/26）；M1 已完成（service 71% / signer 96% 覆盖）；M2 进行中——M2-3~M2-8 共 6 项已落地并通过测试，M2-1/M2-2 结构性重构留待后续。详见 §10 执行记录。**
+> **进度：M0 已完成并通过验收（26/26）；M1 已完成（service 71% / signer 96% 覆盖）；M2 已完成（M2-3~M2-8 六项落地，M2-1/M2-2 结构性重构留待后续）；M3 已编制（≈10 天）——v1.4 移除刮削器需求，主线改为「官方客户端兼容基线」。详见 §10 执行记录与 §7 不做清单。**
 
 ---
 
@@ -192,16 +192,27 @@ internal/
 
 ### M3 · 能力补全（≈ 10 天）
 
+> **v1.4 修订：刮削器需求已移除**（原 M3-3「TMDb 刮削器」整条删除，理由见 §7）。
+> 本里程碑由「堆功能」调整为「**让真实官方客户端跑通全流程**」——M2 结束后实测发现，
+> 端点数量不是瓶颈，**客户端对响应字段的零容错**才是（详见 §10 的兼容实战记录）。
+
 | ID | 任务 | 说明 | 验收标准 |
 |----|------|------|----------|
-| M3-1 | **签名与防盗链闭环**（接 M0-7）：可选 IP 绑定、`redirect_mode: signed\|plain` 灰度开关、签名审计日志 | 完善 `infra/signer` | 新旧源混跑期间可逐前缀切换 |
-| M3-2 | **真实 WebSocket**（修 A8） | RFC6455 帧解析/编码 + ping/pong 心跳 + Session Hub 广播（`Sessions`、`UserDataChanged`、`LibraryChanged`），可用 `gorilla/websocket` 或 `coder/websocket` | 客户端能收到实时更新，长时间连接不掉 |
-| M3-3 | **TMDb 刮削器** | 配置里 `tmdb.api_key` 已预留但无实现。按 `tmdb_id`/`imdb_id`/标题+年份拉取元数据与图片落库；带速率限制与本地缓存 | 导入时可选 `?scrape=true` 自动补全 |
-| M3-4 | **补齐 Emby 端点** | 优先级：`/Items/Filters`、`/Genres`、`/Studios`、`/Persons/{id}`、`/Items/{id}/Intros`、`/Playlists`、`/Collections`、`/LiveTv`（最小空实现）、`/System/Configuration` | 小幻影视全功能页不再报 404 |
-| M3-5 | **搜索增强** | 现仅 `Search/Hints`。加拼音/别名匹配、按类型加权、结果高亮字段 | 中文标题模糊搜索命中率提升 |
+| M3-1 ⏳ | **官方客户端兼容基线**（最高优先级） | ① 把真实客户端的请求序列固化成回归资产：解析 `dist/server.log` 得到「登录→首页→点磁贴→进库→点条目→详情→播放」的请求轨迹，生成断言用例；② **响应字段安全审计**：客户端对数组/对象字段存在大量裸调用（`.length`/`.includes`/`.filter`），凡被裸调用的字段服务端必须恒返回 `[]`/`{}` 而非缺失或 `null`，逐条补契约测试；③ 已修必补项（`System/Endpoint`、`User.Configuration` 全字段、条目详情支持媒体库 ID、`RequiredHttpHeaders`）全部钉死为回归用例 | Emby Theater 3.0.20 全流程无 `Content no longer available`；`scripts/dev/probe_theater.py` 升级为可断言套件并进 CI |
+| M3-2 | **补齐缺失端点**（按实测差异排序） | 官方客户端实测 404 且影响主链路：`/Shows/NextUp`、`/Items/{id}/SpecialFeatures`、`/Videos/{id}/AdditionalParts`、`/Items/Filters`、`/Channels`、`/QuickConnect/Enabled`；次要：`/Genres`、`/Studios`、`/Persons/{id}`、`/Items/{id}/Intros`、`/Playlists`、`/Collections`（可返回空集合）。已实现的不重复做：`/System/Configuration`、`/System/Endpoint`、`/Items/{id}/Similar`、`/Items/{id}/Ancestors`、`/LiveTv/{Recordings,Tuners}` | 首页/详情页/库浏览三个场景无 404；次要端点返回结构正确（允许空） |
+| M3-3 | **真实 WebSocket**（修 A8） | RFC6455 帧解析/编码 + ping/pong 心跳 + Session Hub 广播（`Sessions`、`UserDataChanged`、`LibraryChanged`），可用 `gorilla/websocket` 或 `coder/websocket` | 客户端能收到实时更新，长时间连接不掉 |
+| M3-4 | **签名与防盗链闭环**（接 M0-7） | 可选 IP 绑定、`redirect_mode: signed\|plain` 灰度开关、签名审计日志 | 新旧源混跑期间可逐前缀切换 |
+| M3-5 | **搜索增强** | 现仅 `Search/Hints`。加拼音/别名匹配、按类型加权、结果高亮字段。**拼音走本地库或自建映射表，不引入任何在线查询** | 中文标题模糊搜索命中率提升 |
 | M3-6 | **多用户策略生效** | `User.Policy` 目前只是 JSON 字符串。实现按用户/库的访问控制（EnabledFolders/BlockedMediaFolders）、并发会话数限制、家长分级（OfficialRating） | 受限用户看不到被屏蔽的库 |
-| M3-7 | **批量导入增强** | 增量更新（按 TMDB/IMDB ID 幂等 upsert）、导入前校验、dry-run、失败重试 | 重复导入同一批数据不产生重复条目 |
+| M3-7 | **批量导入增强** | 增量更新（按 `Id` 或 `ProviderIds` 幂等 upsert，不再依赖外部 ID 抓取）、导入前校验、dry-run、失败重试 | 重复导入同一批数据不产生重复条目 |
 | M3-8 | 数据与配置导出/导入 | `fakemby export` / `import` 子命令，产出可迁移 JSON 快照 | 换机迁移 5 分钟完成 |
+| M3-9 ✅ | **刮削器预留清理** | 删除配置/文档里「已预留但无实现」的刮削残留：`config.yaml` 与 `dist/config.yaml` 的 `tmdb:` 段、`docker-compose.yml` 的 `FAKEMBY_TMDB_*`、`CLAUDE.md`/`ARCHITECTURE.md` 的 tmdb 描述。**`ProviderIds`（IMDB/TMDB/TVDB）作为外部 ID 字段保留**——只存标识、不发起抓取 | 全仓库 `grep -ri tmdb` 只剩 ProviderIds 相关说明；符合 §5 原则 4「文档写了没实现就删掉」 |
+
+**M3 完成判据**：
+1. 官方 Emby Theater 走通「登录 → 首页 → 媒体库 → 条目详情 → 播放 → 进度回写」全链路，无报错页；
+2. M3-1 的兼容回归套件进 CI 且全绿（`go test -race ./...` 无失败）；
+3. 小幻影视 / SenPlayer / RodelPlayer 三端回归清单（§6）全勾选；
+4. `grep -ri "tmdb\|刮削"` 在代码与配置中无残留实现承诺。
 
 ---
 
@@ -249,10 +260,10 @@ internal/
 | 单元 | service / signer / cache / config | `testing` + `testify` | ≥ 70% |
 | 契约 | HTTP 端点状态码 + JSON 结构 + **安全反向用例** | `httptest` + golden file | 核心端点 100% |
 | 集成 | 端到端：导入 → 浏览 → 播放 → 进度 | `:memory:` SQLite + 冒烟脚本 | 主链路全覆盖 |
-| 兼容 | 真实客户端回归 | 小幻影视 / SenPlayer / RodelPlayer | 每里程碑人工过一遍清单 |
+| 兼容 | 真实客户端回归 + **客户端源码字段审计**（被裸调的字段必须非 null，见 §10 兼容实战） | 小幻影视 / SenPlayer / RodelPlayer / Emby Theater + `dist/server.log` 请求轨迹 | 每里程碑人工过一遍清单 |
 
 **客户端回归清单**（沿用 `docs/DEVELOPMENT.md`，每次发版前勾选）：
-登录 → 浏览库 → 海报/背景/演员 → 播放（302）→ 续看 → 已看/收藏 → 搜索 → 多用户切换
+登录 → 浏览库 → 海报/背景/演员 → **条目详情页（官方 Theater 必测）** → 播放（302）→ 续看 → 已看/收藏 → 搜索 → 多用户切换
 
 ---
 
@@ -261,7 +272,13 @@ internal/
 避免范围蔓延，以下明确排除：
 
 - ❌ 真实转码 / ffmpeg 集成 —— 与「零带宽 302」的设计前提冲突
-- ❌ 本地文件扫描刮削 —— 项目定位就是「API 直写元数据」
+- ❌ **本地文件扫描刮削** —— 项目定位就是「API 直写元数据」
+- ❌ **任何在线元数据抓取（TMDb / IMDB / TVDB / 豆瓣 / Bangumi…）** —— v1.4 明确移除（原 M3-3）。
+  理由：① 与「不扫库不刮削、元数据由上游导入方提供」的定位冲突；② 刮削引入外部 API 依赖、
+  限流、图片落地与版权合规三类长期成本，收益却是「少写几条 API」；③ 保留只会制造
+  「文档说有、代码没有」的漂移（§5 原则 4）。**用户如需要刮削，应在导入侧（外部脚本/
+  媒体库管理工具）完成后通过导入接口写入**，本项目只负责存储与分发。
+  注意区分：`ProviderIds`（IMDB/TMDB/TVDB 外部 ID）**保留**，它只是标识字段，不触发任何网络请求。
 - ❌ 完整 LiveTV / DVR
 - ❌ 从 Emby 官方服务器迁移用户数据
 - ❌ 分布式 / 多实例集群（sqlite 单写前提不变，需要时再上 Postgres）
@@ -335,7 +352,7 @@ FAKEMBY_SERVER_PORT=9999 ./fakemby &   # 期望监听 9999
 | M0 | 止血 + 工程基线 | 6 天 | 6 天 |
 | M1 | 测试 + CI | 5 天 | 11 天 |
 | M2 | 架构归位 + 性能 | 5 天 | 16 天 |
-| M3 | 能力补全 | 10 天 | 26 天 |
+| M3 | 能力补全（兼容基线 + 端点补全，**无刮削**） | 10 天 | 26 天 |
 | M4 | 可运维 + 生态 | 10 天 | 36 天 |
 
 > 兼职投入按 2 倍计。M3/M4 内部任务可并行裁剪，按实际优先级取舍。
@@ -481,7 +498,110 @@ M2-1/M2-2 作为独立的后续里程碑执行（届时 M1 测试网可保证搬
 
 ---
 
+### 官方客户端兼容实战（2026-09-12，M3 立项依据）
+
+M2 收尾后用**官方 Emby Theater 3.0.20** 做了真机回归（此前只测过第三方客户端），
+暴露出「端点数量够、但客户端跑不通」的一整类问题。四个根因，全部已修并补契约测试：
+
+| # | 现象 | 根因 | 修复 |
+|---|------|------|------|
+| 1 | 首页无限转圈 | `homesections.js` 裸调 `user.Configuration.LatestItemsExcludes.includes(...)`，我们的 `UserConfig` 只有 3 个字段 → `undefined.includes` TypeError 炸断 `Promise.all`，加载圈永不消失 | `UserConfig` 对齐官方全字段 + `DefaultUserConfig()`（数组恒初始化，`null.includes` 同样崩）；契约测试 `TestUserConfigurationArrayFieldsNeverNull` |
+| 2 | 首页背景图裂图 | 图片 `redirect` 模式下客户端跟随 302 后从外部源取图失败（本机直连可下，Electron 路径不可复现） | 架构性改为 `proxy_cache`（服务器代取出图，客户端永不直连外部源）；顺带修 `proxy_cache` 下缓存路径被 `filepath.Join` 清洗导致 handler 前缀判断失配、全部图片 500 的潜伏 bug |
+| 3 | 点磁贴报 `Content no longer available` | 客户端点磁贴请求 `GET /Users/{uid}/Items/{libraryId}`，而 `getItem` 只查 `media_items`，媒体库在 `libraries` 表 → 404 炸断详情页 Promise 链 | `getItem` 回退查媒体库；抽 `libraryToDTO` 保证与 Views 端点字段一致 |
+| 4 | 点电影/剧集仍报同一错误 | ① `getPlaybackMediaSources` 无条件先调 `GET /System/Endpoint`，未实现 → 404；② `supportsDirectPlay()` 裸调 `mediaSource.RequiredHttpHeaders.length`，该字段带 `omitempty` 被序列化省略 → `undefined.length` TypeError | 新增 `/System/Endpoint`（按 ClientIP 返回 `IsLocal`/`IsInNetwork`）；`RequiredHttpHeaders` 去掉 `omitempty`，空 map 输出 `{}` |
+
+**方法论（写进 M3-1 的做法）**：
+
+1. **客户端源码就在本机**：`F:\Program Files\Emby Theater\electronapp\www`（未压缩 JS），
+   比黑盒猜快一个量级——「请求流停在哪」看服务端日志，「为什么停」只能读客户端源码。
+2. **客户端对响应字段零容错**：`.length` / `.includes` / `.filter` 的裸调用遍布渲染链，
+   **`undefined` 与 `null` 都会抛异常**，而 Go 的 nil 切片/空 map + `omitempty` 恰好专产这两种值。
+   凡是会被客户端裸调用的字段，服务端必须恒输出 `[]`/`{}`。
+3. **跑后台服务要重定向日志**：`> dist/server.log 2>&1`，否则拿不到客户端的真实请求轨迹。
+
+**遗留（进 M3-2）**：`/Shows/NextUp`、`/Items/{id}/SpecialFeatures`、`/Videos/{id}/AdditionalParts`、
+`/Items/Filters`、`/Channels`、`/QuickConnect/Enabled` 仍 404（目前可降级，详情页部分板块空白）。
+
+**race 抖动记录**：`TestS3SignedLinkVerifyRoundTrip` 在全包 `-race` 下偶发失败（篡改签名用例
+期望 401 实得 200），单独跑 3 次全过、全包重跑全过——疑似测试间状态泄漏，与上述改动无关，
+M3 期间若再现需专项排查。
+
+### M3 执行记录（2026-09-12 晚）
+
+**M3-9 刮削器残留清理 · 已完成**
+
+实际残留比预估少：`config.yaml` / `dist/config.yaml` / `docker-compose.yml` 里本就没有 `tmdb`
+段（早期已清），本轮清的是文档：
+
+| 文件 | 处理 |
+|------|------|
+| `CLAUDE.md` | 删目录树里的 `tmdb.go`、配置分段里的 `TMDb (optional)`、「`tmdb.go` (optional)」说明、YAML 示例里的 `tmdb:` 段、测试章节的「Mock external APIs (TMDb)」；DB 字段说明改为「opaque identifiers，never used to fetch remote metadata」 |
+| `docs/ARCHITECTURE.md` | 配置分段去掉 `tmdb` 并加注「无 tmdb 段」；架构图 `TMDb / CDN` → `外部图床 / CDN` 并补 `proxy_cache` 分支 |
+| `docs/CONFIGURATION.md` | 删 YAML 示例 `tmdb:` 段；DB 表字段注明「仅作标识，服务端不会据此发起任何网络请求」 |
+
+保留：`ProviderIds`（IMDB/TMDB/TVDB）、`media_items` 的 `tmdb_id`/`imdb_id`/`tvdb_id` 列——
+只存标识，不触发抓取。全仓库 `grep -ri tmdb` 现只剩 ProviderIds 说明与 §7 不做清单。
+
+**M3-1 官方客户端兼容基线 · 进行中**
+
+1. **新增审计工具 `scripts/dev/audit_client_fields.py`**
+   扫客户端源码提取「被裸调的响应字段」（`.length`/`.includes`/`.filter`/…），与本项目 DTO 的
+   json tag 交叉比对，按 HIGH/MEDIUM/LOW 分级，HIGH 时退出码 1（可进 CI 门禁）。
+
+   两个关键设计（都是踩过坑才加的）：
+   - **DTO 扫描目录必须含 `internal/api`**：`UserConfig`/`UserPolicy` 定义在
+     `internal/api/emby/auth.go`，只扫 `internal/types` 会把已修的 `LatestItemsExcludes`
+     误报成「DTO 无此字段」。
+   - **必须识别短路兜底**：`item.ArtistItems && item.ArtistItems.length` 这类写法在
+     undefined 时是安全的。不做这个识别，`ArtistItems`/`AlbumArtists` 会被当成必改项，
+     白白给所有 DTO 加字段。加了之后裸调字段从 62 降到 53，21 个字段归入「客户端自带兜底」。
+
+   运行：`python scripts/dev/audit_client_fields.py [--client-dir X] [--top N]`
+   （客户端不在 `Program Files` 时可用 `FAKEMBY_CLIENT_DIR` 指定，本机在 `F:\Program Files`）。
+
+2. **审计发现并修复 HIGH 1 项**
+   `UserPolicy.EnabledFolders` / `BlockedMediaFolders` 带 `omitempty`：用户未被单独授权目录时
+   空切片被整个省略，客户端 `Policy.EnabledFolders.includes(id)` 拿到 undefined 直接崩。
+   已去掉 `omitempty`（构造点本来就用 `[]string{}` 初始化）。
+
+3. **新增 `internal/emby/nullsafety_test.go`——M3-1 的总闸**
+   不再逐个字段猜，而是**递归扫描真实响应里所有的 null**：
+   - `TestNoNullValuesInClientFacingResponses`：19 个官方客户端主链路端点（启动/登录/首页/
+     库浏览/条目详情/剧集结构/PlaybackInfo）逐个断言无 null（白名单除外，且白名单必须写理由）；
+     顺带断言端点必须 200，端点缺失比 null 更严重。
+   - `TestCollectNullsFindsNestedNulls` / `TestCollectNullsReturnsEmptyForCleanJSON`：
+     **扫描器自身的自测**——没有它，「全端点无 null」通过也可能只是因为扫描器坏了。
+   - `TestUserPolicyArrayFieldsNeverOmitted`、`TestPlaybackInfoContainerFieldsNeverNull`：
+     把本轮与上一轮已修的兼容问题钉死成回归用例。
+
+   新增端点时把路径加进 `clientFacingEndpoints` 即可纳入防护。
+
+**方法论补充（承接上文 3 条）**：
+
+4. **别急着给字段兜底，先确认客户端有没有兜底**。客户端并非处处裸调，
+   `x.F && x.F.length` / `x.F || []` 很常见。审计工具要能区分，否则会做一堆无用功，
+   还会给所有响应平白增加字段。
+
+**M3-1 剩余**：把 `dist/server.log` 的真实请求序列解析成断言用例（当前以
+`clientFacingEndpoints` 清单手工固化，尚未做成 log 驱动）；`probe_theater.py` 升级为可断言套件。
+
+---
+
 ## 修订记录
+
+### v1.5（2026-09-12 晚 M3 开工）
+
+1. **M3-9 已完成**：清掉 `CLAUDE.md` / `docs/ARCHITECTURE.md` / `docs/CONFIGURATION.md` 里
+   「已预留但无实现」的 tmdb 描述（配置文件里本就没有该段）。`ProviderIds` 与
+   `media_items` 的 `tmdb_id`/`imdb_id`/`tvdb_id` 列保留。
+2. **M3-1 进行中**：新增客户端字段审计工具 `scripts/dev/audit_client_fields.py`
+   （含短路兜底识别，避免过度修复）；修复审计发现的唯一 HIGH 项
+   `UserPolicy.EnabledFolders`/`BlockedMediaFolders` 的 `omitempty`；
+   新增 `internal/emby/nullsafety_test.go`——19 个面向客户端端点的递归 null 扫描总闸
+   + 扫描器自测 + 两轮已修兼容问题的回归锁。
+3. **§10 新增「M3 执行记录」**：含审计工具的两个踩坑（DTO 扫描目录要含 `internal/api`、
+   必须识别 `x.F && x.F.length` 短路兜底）与方法论第 4 条「先确认客户端有没有兜底」。
+4. 顶部进度行、M3 任务表加 `✅`/`⏳` 状态标记。
 
 ### v1.1（2026-09-11 复核修订）
 
@@ -502,3 +622,18 @@ M2-1/M2-2 作为独立的后续里程碑执行（届时 M1 测试网可保证搬
 1. **新增 §10 `M2 · 已完成` 段落**：M2-3/4/5/6/7/8 共 6 项已落地（DB 读写分离、字幕索引对齐、图片缓存配额、进度 flush 可控、登录限流+强制改密+Basic Auth 去增发、删除 GetUsableToken 空壳），附验收结果、新增配置键/端点/包、10 个新增测试、已知行为破坏。
 2. **记录偏离决策**：M2-1（目录重构）与 M2-2（repo 层接口）本次**未做**，留待后续里程碑。理由是二者属跨里程碑结构性大改，与 M2-3~8 的局部确定性修复性质不同；按 §5 执行原则第 2 条「每个里程碑结束都要有可运行产物」，优先把 6 项已明确、已被 M1 测试网覆盖的修复落地为可运行产物。
 3. **顶部进度行**更新为「M2 进行中」。
+
+### v1.4（2026-09-12 M3 编制：移除刮削器）
+
+1. **删除原 M3-3「TMDb 刮削器」**，全部刮削需求移入 §7 明确不做（含在线元数据抓取的整体排除理由），
+   并新增 **M3-9「刮削器预留清理」**：删掉 `config.yaml`/`dist/config.yaml` 的 `tmdb:` 段、
+   `docker-compose.yml` 的 `FAKEMBY_TMDB_*`、`CLAUDE.md`/`ARCHITECTURE.md` 的 tmdb 描述；
+   `ProviderIds` 作为外部 ID 字段保留（只存标识、不发起网络请求）。
+2. **M3 主线改为「官方客户端兼容基线」**：新增 M3-1（请求轨迹固化 + 响应字段安全审计），
+   依据是 M2 收尾后官方 Emby Theater 3.0.20 真机回归暴露的四个根因（见 §10 新增的兼容实战记录）。
+   原 M3 各任务重新编号，M3-7 批量导入的幂等键由「TMDB/IMDB ID」改为「`Id` 或 `ProviderIds`」，
+   M3-5 搜索增强明确拼音走本地实现、不引入在线查询。
+3. **新增 §10「官方客户端兼容实战」段落**：记录四个根因、修复、方法论（客户端源码位置、
+   `undefined`/`null` 零容错、后台服务日志重定向）与遗留端点清单。
+4. **补 M3 完成判据**（原 M3 段落缺失，与其他里程碑体例不一致）。
+5. 顶部进度行、附录 B 时间线同步更新。
