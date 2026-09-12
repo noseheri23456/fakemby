@@ -201,7 +201,7 @@ internal/
 | M3-1 ⏳ | **官方客户端兼容基线**（最高优先级） | ① 把真实客户端的请求序列固化成回归资产：解析 `dist/server.log` 得到「登录→首页→点磁贴→进库→点条目→详情→播放」的请求轨迹，生成断言用例；② **响应字段安全审计**：客户端对数组/对象字段存在大量裸调用（`.length`/`.includes`/`.filter`），凡被裸调用的字段服务端必须恒返回 `[]`/`{}` 而非缺失或 `null`，逐条补契约测试；③ 已修必补项（`System/Endpoint`、`User.Configuration` 全字段、条目详情支持媒体库 ID、`RequiredHttpHeaders`）全部钉死为回归用例 | Emby Theater 3.0.20 全流程无 `Content no longer available`；`scripts/dev/probe_theater.py` 升级为可断言套件并进 CI |
 | M3-2 | **补齐缺失端点**（按实测差异排序） | **v1.6 复核：v1.4 列的 6 个「实测 404」里 5 个其实已随 M2 重构落地**（`NextUp`、`Items/Filters`、`Channels`、`Genres`、`Studios` 均 200），真正缺的只剩 `LiveTv/Channels`。本轮实测又发现 3 个**契约形态**问题（不是 404 但同样会崩）：`Ancestors` 因 nil 切片返回 `null`、`QuickConnect/Enabled` 返回裸布尔而非 `{"Enabled":false}`、`LiveTv/Channels` 404。均已修。次要项：`/Genres`、`/Studios`、`/Persons/{id}`、`/Items/{id}/Intros`、`/Playlists`、`/Collections` 已实现（可返回空集合） | 首页/详情页/库浏览三个场景无 404；列表端点返回结构正确（允许空） |
 | M3-3 ✅ | **真实 WebSocket**（修 A8） | **v1.7 实况复核：gorilla/websocket 的帧收发、ping/pong 心跳、按用户广播在之前的历史提交里其实已经落地**，本轮做的是把它补成「能扛真实客户端」的形态：① **订阅协议**——官方客户端 `onopen` 后补发 `<Name>Start`（Data 是 `"0,1500,0,true,true"` 这类字符串）并期望同名首帧，原先完全不回包，客户端只能退化成定时轮询；现 `Sessions` 回该用户会话快照、`ScheduledTasksInfo`/`ActivityLogEntry` 回空数组（不能是 `null`）；② **业务事件补全**——已看/收藏也推 `UserDataChanged`（原先只有播放进度推），`Sessions` 快照里的 `PlayableMediaTypes`/`SupportedCommands`/`AdditionalUsers` 初始化为空切片（客户端裸调 `.includes`）；③ **健壮性**——连接上限（超出 503）、队列满计数而非阻塞、建连下发 `ForceKeepAlive`、关闭时先发 `ServerShuttingDown` 再发 1001 关闭帧、心跳参数可配（测试压到 50ms）；④ 顺带修掉一个**自死锁**：播放上报持 `activeSessionsMu` 写锁时回调了会取读锁的 `userSessions`，任何一次进度上报都会把整个请求挂死 | `go test ./internal/infra/ws/ ./internal/emby/` 全绿；Emby Theater 连接后不再轮询（日志里 `/emby/Sessions` 周期性请求消失） |
-| M3-4 | **签名与防盗链闭环**（接 M0-7） | 可选 IP 绑定、`redirect_mode: signed\|plain` 灰度开关、签名审计日志 | 新旧源混跑期间可逐前缀切换 |
+| M3-4 ✅ | **签名与防盗链闭环**（接 M0-7） | **v1.8 实况复核：清单里三件事（IP 绑定、`redirect_mode` 灰度、逐前缀切换）在 M0-7 就实现了**，本轮补的是①**修一个 fail-open 级实现偏差**：`ShouldSign` 注释与 `CONFIGURATION.md:50` 都写「`sign_prefixes` 为空 = 全部签名」，代码却在末尾 `return false`——而两份 `config.yaml` 的出厂默认值正是 `[]`，等于**默认所有播放直链都不带签名，防盗链形同虚设**（自 M0-7 提交 65d83c0 起）。已改为空列表返回 `true`；②新增约束：密钥为空或仍是出厂默认值时**不签名**——用空 key 签出的是谁都能伪造的「假签名」，比不签名更危险；③**签名审计日志**：原先只有失败才 `Warn`，成功签发与校验成功完全无痕，无法区分「没人盗链」和「签名根本没生效」。现 `auditSignature` 统一打点 `issue`/`verify_ok`/`verify_fail`/`verify_rejected`，含 item/source/uid/ip/exp/mode，**不打 sig 本身**。判定优先级：`plain` 总开关 > `plain_prefixes`（逐前缀免签）> `sign_prefixes`（空=全签） | `go test ./internal/config/ ./internal/emby/` 全绿；默认配置下直链带 `sig` 且能被 `/api/auth/verify` 认回，篡改 `item_id` 后 401；`plain` 模式下不带签名 |
 | M3-5 | **搜索增强** | 现仅 `Search/Hints`。加拼音/别名匹配、按类型加权、结果高亮字段。**拼音走本地库或自建映射表，不引入任何在线查询** | 中文标题模糊搜索命中率提升 |
 | M3-6 ✅ | **多用户策略生效** | **v1.7 实况复核：清单里要做的三件事早就做完了**——`internal/access` 已实现按库访问控制（EnabledFolders/BlockedMediaFolders，黑名单优先）、家长分级（MaxParentalRating + BlockUnratedItems）、并发会话数限制（SimultaneousStreamLimit → 429），而且是**递归 SQL CTE** 实现的：祖先被拒则所有后代（含未分级子集）一并拒绝，策略解析失败即 `1=0` 全拒（fail-closed）。本轮补的是**「DTO 与 enforcement 脱节」**这一真实缺口：① `MaxParentalRating`/`BlockUnratedItems` enforcement 一直在用，但 `UserPolicy` DTO 没暴露——官方客户端「GET 用户 → 改开关 → POST 回 `/emby/Users/{id}/Policy`」的往返会把它们静默清空，而**清空家长分级是放开限制而不是收紧**（fail-open）；② `POST /emby/Users/{id}/Policy` 落盘前不校验，写坏的策略在 enforcement 侧等于全拒、管理 UI 却显示默认值，排障无从下手——现在用 `access.Normalize` 校验，非法返回 400；③ `internal/access` 这个最关键的包**此前零测试**，补了 7 组单测（Normalize 严格性、黑白名单、分级边界、SessionLimit） | `go test ./internal/access/ ./internal/emby/` 全绿；`Policy` 往返后家长分级无损；非法策略 400 |
 | M3-7 | **批量导入增强** | 增量更新（按 `Id` 或 `ProviderIds` 幂等 upsert，不再依赖外部 ID 抓取）、导入前校验、dry-run、失败重试 | 重复导入同一批数据不产生重复条目 |
@@ -663,6 +663,28 @@ M3 期间若再现需专项排查。
 ---
 
 ## 修订记录
+
+### v1.8（2026-09-13 M3-4 复核）
+
+1. **M3-4 完成，并挖出一个 fail-open 级实现偏差**：`ShouldSign` 的注释、
+   `CONFIGURATION.md:50`、ROADMAP 的 M0-7 条目三方一致写着「`sign_prefixes` 为空 = 全部签名」，
+   实现却在末尾 `return false`。而 `config.yaml` / `dist/config.yaml` 的出厂值就是 `[]`——
+   **默认部署下所有播放直链都不带签名**，M0-7 建立的防盗链等于没生效（自 65d83c0 起）。
+   教训：配置项存在、有默认值、有环境变量绑定，都不能证明它被正确实现了；
+   「空列表的语义」尤其容易在白名单场景下被写反，且 fail-open 方向不报错、无任何症状。
+2. **新增约束**：`sign_key` 为空或仍是出厂默认值 `change-me-in-production` 时**不签名**。
+   用空 key 签出的是任何人都能伪造的签名，比不签名更糟——它让直链看起来有防线。
+3. **签名审计日志**：原先只有校验失败才 `Warn`，签发与校验成功完全无痕。
+   新增 `auditSignature`（`issue`/`verify_ok`/`verify_fail`/`verify_rejected`），
+   只打 item/source/uid/ip/exp/mode 等可定位维度，不打 sig 或 token。
+4. `internal/config` 此前**零测试**——而 `ShouldSign` 正是决定直链是否签名的安全开关。
+   补矩阵测试（含默认配置必须签名）与 `URLPrefixMatches` 的 13 条边界
+   （`evil.com` 不得命中 `good.com` 前缀、`/vodfoo` 不得命中 `/vod`、带凭据 URL 一律拒绝）。
+5. 端到端契约测试 `internal/emby/signature_test.go`：断言 **HTTP 层真实行为**而非纯函数返回值
+   （纯函数对了但没人调用它，等于没修），并覆盖签发→`/api/auth/verify` 认回→篡改 `item_id` 被拒的闭环。
+6. **M3-5 / M3-7 / M3-8 实况复核：均已实现**（拼音+首字母+按类型加权+高亮+别名；
+   幂等 upsert + dry-run + 导入前校验 + savepoint 重试；`fakemby export|import` 子命令），
+   本轮未改动。M3 仅剩 M3-1 的「log 驱动轨迹」收尾。
 
 ### v1.7（2026-09-13 凌晨 M3-3 + M3-6 复核）
 

@@ -85,6 +85,7 @@ func playbackAuth(sgn *signer.Signer, expiryDays int) gin.HandlerFunc {
 					var user database.User
 					if database.Get().Where("id = ?", p.UserID).First(&user).Error != nil || !authorizeMediaRequest(c, &user) {
 						if !c.IsAborted() {
+							auditSignature(c, "verify_rejected", "uid", p.UserID, "item_id", p.ItemID, "reason", "user missing or unauthorized")
 							c.AbortWithStatusJSON(401, ErrUnauthorized)
 						}
 						return
@@ -95,9 +96,11 @@ func playbackAuth(sgn *signer.Signer, expiryDays int) gin.HandlerFunc {
 					}
 					c.Set("user_id", c.Query("uid"))
 					c.Set("auth_method", "signature")
+					auditSignature(c, "verify_ok", "method", "signature", "uid", p.UserID, "item_id", p.ItemID, "source_id", p.SourceID, "exp", exp, "ip_bound", p.IP != "")
 					c.Next()
 					return
 				}
+				auditSignature(c, "verify_fail", "uid", c.Query("uid"), "item_id", p.ItemID, "source_id", p.SourceID, "exp", exp)
 				slog.Warn("播放签名校验失败", "path", c.Request.URL.Path, "remote_ip", c.ClientIP())
 			}
 		}
@@ -139,12 +142,30 @@ func verifySignedURL(sgn *signer.Signer) gin.HandlerFunc {
 		}
 
 		if err := sgn.VerifyRaw(payload, exp, c.Query("sig")); err != nil {
+			auditSignature(c, "verify_fail", "uid", c.Query("uid"), "item_id", c.Query("item_id"),
+				"source_id", c.Query("source_id"), "exp", exp, "reason", err.Error())
 			c.JSON(http.StatusUnauthorized, gin.H{"Message": err.Error()})
 			return
 		}
 
+		auditSignature(c, "verify_ok", "method", "reverse_proxy", "uid", c.Query("uid"), "item_id", c.Query("item_id"),
+			"source_id", c.Query("source_id"), "exp", exp, "ip_bound", signedClientIP(c) != "")
 		c.JSON(http.StatusOK, gin.H{"valid": true, "exp": exp})
 	}
+}
+
+// auditSignature 统一签名审计打点。
+// 签发与校验（含成功）都必须留痕：只看失败日志的话，无法判断「没人盗链」还是
+// 「签名根本没生效」，灰度切换 sign_prefixes 时尤其需要这条轨迹。
+// 绝不打 sig/token 本身，只打可定位的维度。
+func auditSignature(c *gin.Context, event string, kv ...any) {
+	fields := []any{
+		"event", event,
+		"path", c.Request.URL.Path,
+		"remote_ip", c.ClientIP(),
+	}
+	fields = append(fields, kv...)
+	slog.Info("signature-audit", fields...)
 }
 
 func firstNonEmpty(vals ...string) string {
@@ -458,6 +479,8 @@ func redirectSource(c *gin.Context, src *database.MediaSource) {
 		q.Set("sig", sig)
 		u.RawQuery = q.Encode()
 		raw = u.String()
+		auditSignature(c, "issue", "item_id", src.ItemID, "source_id", src.ID, "uid", payload.UserID,
+			"exp", exp, "ip_bound", payload.IP != "", "mode", cfg.Playback.RedirectMode)
 		slog.Info("Signed source redirect", "item_id", src.ItemID, "source_id", src.ID, "expires", exp, "ip_bound", payload.IP != "")
 	}
 	c.Header("Referrer-Policy", "no-referrer")

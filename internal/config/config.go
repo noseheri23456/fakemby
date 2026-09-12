@@ -291,15 +291,27 @@ func (c *Config) EnsureSignKey() {
 }
 
 // ShouldSign 判断某个源 URL 是否需要追加签名参数。
-// sign_prefixes 为空表示对所有源签名（便于自建反代场景）。
+//
+// 判定顺序（前者压过后者）：
+//  0. 签名未启用（sign_key 空或仍是默认值）→ 不签名
+//  1. redirect_mode == "plain"  → 全不签名（灰度总开关）
+//  2. plain_prefixes 命中       → 不签名（逐前缀免签，灰度切换主手段）
+//  3. sign_prefixes 为空        → 签名（空 = 不限定范围 = 全部签名）
+//  4. sign_prefixes 命中则签名，未命中则不签名
+//
+// 第 3 条是出厂默认（两份 config.yaml 的 sign_prefixes 都是 []）：默认必须签名，
+// 否则防盗链形同虚设。曾因写成 `return false` 导致默认全部直链裸奔（fail-open）。
 func (c *Config) ShouldSign(rawURL string) bool {
-	if c == nil || rawURL == "" || c.Playback.RedirectMode == "plain" {
+	if c == nil || rawURL == "" || c.Playback.RedirectMode == "plain" || !c.SigningEnabled() {
 		return false
 	}
 	for _, p := range c.Playback.PlainPrefixes {
 		if URLPrefixMatches(rawURL, p) {
 			return false
 		}
+	}
+	if len(c.Playback.SignPrefixes) == 0 {
+		return true
 	}
 	for _, p := range c.Playback.SignPrefixes {
 		if URLPrefixMatches(rawURL, p) {
