@@ -1,10 +1,12 @@
 # FakEmby 继续开发方案
 
-> 版本：v1.9 ｜ 编制日期：2026-09-11 ｜ 最近更新：2026-09-13
+> 版本：v1.10 ｜ 编制日期：2026-09-11 ｜ 最近更新：2026-09-13
 > 适用对象：本仓库当前代码基线（master，tag `v0.9.0-pre`）
 > 目标：把「能跑通的 Emby 兼容层」推进为「可公开部署、可长期维护的产品级服务」
 >
-> **进度：M0 已完成并通过验收（26/26）；M1 已完成（service 71% / signer 96% 覆盖）；M2 已完成（M2-3~M2-8 六项落地，M2-1/M2-2 结构性重构留待后续）；M3 九项中八项已完成（M3-2~M3-9），仅 M3-1 剩「log 驱动轨迹」，且**整轮修复尚待一次完整用户实测**——v1.4 移除刮削器需求，主线改为「官方客户端兼容基线」；M4 七项中 M4-3（发布工程）与 M4-4（Helm chart + compose 加固）已完成并进入 CHANGELOG `Unreleased`，其余 M4-1/2/5/6/7 待做。详见 §10 执行记录与 §7 不做清单。**
+> **进度：M0 已完成并通过验收（26/26）；M1 已完成（service 71% / signer 96% 覆盖）；M2 已完成（M2-1/M2-2 结构性重构已随 `internal/api/{emby,admin}` + `internal/repo` 落地，原 `internal/emby` 只剩转发门面）；M3 九项全部完成（M3-1 最后一项「log 驱动轨迹」已落地：解析真实客户端日志生成轨迹资产并回放断言）；M4 七项全部完成（M4-1/2/5/6/7 经 v1.10 复核早已实现，M4-3/M4-4 已完成并进入 CHANGELOG `Unreleased`）。v1.4 移除刮削器需求，主线改为「官方客户端兼容基线」。详见 §10 执行记录与 §7 不做清单。**
+>
+> **⚠️ 唯一未闭环项：整轮修复仍待一次完整用户实测**——M3-1~M3-6 的修复至今没经过一轮真机验证，缺的不是代码而是验证。
 
 ---
 
@@ -196,13 +198,14 @@ internal/
 > 本里程碑由「堆功能」调整为「**让真实官方客户端跑通全流程**」——M2 结束后实测发现，
 > 端点数量不是瓶颈，**客户端对响应字段的零容错**才是（详见 §10 的兼容实战记录）。
 
-**进度总览（v1.8）**：9 项中 **8 项已完成**，仅 **M3-1 剩「log 驱动轨迹」一项**收尾。
+**进度总览（v1.10）**：9 项**全部完成**，M3-1 最后一项「log 驱动轨迹」已于 2026-09-13 落地
+（解析真实客户端日志 → 轨迹资产 → 回放断言，首轮即抓出 4 个真实 404 并修复）。
 已完成项里有一半是「复核后发现早已实现、本轮只补缺口」（M3-3/4/5/6/7/8 都属此类），
-详见各条目的「v1.x 实况复核」与 §12 修订记录。
+详见各条目的「v1.x 实况复核」与 §12 修订记录。**唯一未闭环：整轮修复尚待一次完整用户实测。**
 
 | ID | 任务 | 说明 | 验收标准 |
 |----|------|------|----------|
-| M3-1 ⏳ | **官方客户端兼容基线**（最高优先级） | **v1.8 状态：②③ 已完成，仅剩 ①**。② 响应字段安全审计已落成总闸 `internal/emby/nullsafety_test.go`（递归扫描 25 个面向客户端端点断言无 `null`，白名单须逐字段拿客户端源码举证）+ 审计工具 `scripts/dev/audit_client_fields.py`（HIGH 风险退出码 1，不进 CI——依赖本机 Theater 源码）；③ `System/Endpoint`、`User.Configuration` 全字段、条目详情支持媒体库 ID、`RequiredHttpHeaders` 均已修并钉死为回归用例。**剩 ①**：把真实客户端的请求序列固化成回归资产——解析 `dist/server.log` 得到「登录→首页→点磁贴→进库→点条目→详情→播放」的请求轨迹并生成断言用例（`probe_theater.py` 已是可断言套件但走的是预设序列，不是解析真实日志） | Emby Theater 3.0.20 全流程无 `Content no longer available`；`scripts/dev/probe_theater.py` 升级为可断言套件并进 CI |
+| M3-1 ✅ | **官方客户端兼容基线**（最高优先级） | **v1.10 状态：①②③ 全部完成**。② 响应字段安全审计已落成总闸 `internal/emby/nullsafety_test.go`（递归扫描 25 个面向客户端端点断言无 `null`，白名单须逐字段拿客户端源码举证）+ 审计工具 `scripts/dev/audit_client_fields.py`（HIGH 风险退出码 1，不进 CI——依赖本机 Theater 源码）；③ `System/Endpoint`、`User.Configuration` 全字段、条目详情支持媒体库 ID、`RequiredHttpHeaders` 均已修并钉死为回归用例；**① log 驱动轨迹已落地**——`scripts/dev/log_trajectory.py` 解析 `dist/server.log`（真实 Emby Theater 3.0.20 会话，125 条请求 → 47 个去重端点）生成轨迹资产 `internal/emby/testdata/theater_trajectory.json`，由 `internal/emby/trajectory_test.go` 回放断言「客户端走过的路不准 404、JSON 响应无 null」。首轮回放即抓出 4 个真实 404 并已修复（详见 §10） | Emby Theater 3.0.20 全流程无 `Content no longer available`；`scripts/dev/probe_theater.py` 升级为可断言套件并进 CI；轨迹回放全绿 |
 | M3-2 ✅ | **补齐缺失端点**（按实测差异排序） | **v1.6 复核：v1.4 列的 6 个「实测 404」里 5 个其实已随 M2 重构落地**（`NextUp`、`Items/Filters`、`Channels`、`Genres`、`Studios` 均 200），真正缺的只剩 `LiveTv/Channels`。本轮实测又发现 3 个**契约形态**问题（不是 404 但同样会崩）：`Ancestors` 因 nil 切片返回 `null`、`QuickConnect/Enabled` 返回裸布尔而非 `{"Enabled":false}`、`LiveTv/Channels` 404。均已修。次要项：`/Genres`、`/Studios`、`/Persons/{id}`、`/Items/{id}/Intros`、`/Playlists`、`/Collections` 已实现（可返回空集合） | 首页/详情页/库浏览三个场景无 404；列表端点返回结构正确（允许空） |
 | M3-3 ✅ | **真实 WebSocket**（修 A8） | **v1.7 实况复核：gorilla/websocket 的帧收发、ping/pong 心跳、按用户广播在之前的历史提交里其实已经落地**，本轮做的是把它补成「能扛真实客户端」的形态：① **订阅协议**——官方客户端 `onopen` 后补发 `<Name>Start`（Data 是 `"0,1500,0,true,true"` 这类字符串）并期望同名首帧，原先完全不回包，客户端只能退化成定时轮询；现 `Sessions` 回该用户会话快照、`ScheduledTasksInfo`/`ActivityLogEntry` 回空数组（不能是 `null`）；② **业务事件补全**——已看/收藏也推 `UserDataChanged`（原先只有播放进度推），`Sessions` 快照里的 `PlayableMediaTypes`/`SupportedCommands`/`AdditionalUsers` 初始化为空切片（客户端裸调 `.includes`）；③ **健壮性**——连接上限（超出 503）、队列满计数而非阻塞、建连下发 `ForceKeepAlive`、关闭时先发 `ServerShuttingDown` 再发 1001 关闭帧、心跳参数可配（测试压到 50ms）；④ 顺带修掉一个**自死锁**：播放上报持 `activeSessionsMu` 写锁时回调了会取读锁的 `userSessions`，任何一次进度上报都会把整个请求挂死 | `go test ./internal/infra/ws/ ./internal/emby/` 全绿；Emby Theater 连接后不再轮询（日志里 `/emby/Sessions` 周期性请求消失） |
 | M3-4 ✅ | **签名与防盗链闭环**（接 M0-7） | **v1.8 实况复核：清单里三件事（IP 绑定、`redirect_mode` 灰度、逐前缀切换）在 M0-7 就实现了**，本轮补的是①**修一个 fail-open 级实现偏差**：`ShouldSign` 注释与 `CONFIGURATION.md:50` 都写「`sign_prefixes` 为空 = 全部签名」，代码却在末尾 `return false`——而两份 `config.yaml` 的出厂默认值正是 `[]`，等于**默认所有播放直链都不带签名，防盗链形同虚设**（自 M0-7 提交 65d83c0 起）。已改为空列表返回 `true`；②新增约束：密钥为空或仍是出厂默认值时**不签名**——用空 key 签出的是谁都能伪造的「假签名」，比不签名更危险；③**签名审计日志**：原先只有失败才 `Warn`，成功签发与校验成功完全无痕，无法区分「没人盗链」和「签名根本没生效」。现 `auditSignature` 统一打点 `issue`/`verify_ok`/`verify_fail`/`verify_rejected`，含 item/source/uid/ip/exp/mode，**不打 sig 本身**。判定优先级：`plain` 总开关 > `plain_prefixes`（逐前缀免签）> `sign_prefixes`（空=全签） | `go test ./internal/config/ ./internal/emby/` 全绿；默认配置下直链带 `sig` 且能被 `/api/auth/verify` 认回，篡改 `item_id` 后 401；`plain` 模式下不带签名 |
@@ -215,9 +218,12 @@ internal/
 **M3 完成判据**（v1.8 核对后的达成情况）：
 1. ⏳ **待实测**：官方 Emby Theater 走通「登录 → 首页 → 媒体库 → 条目详情 → 播放 → 进度回写」全链路，无报错页。
    —— M3-1~M3-6 的修复**至今未经过一轮完整用户实测**（自用户报「问题依旧」后一直没再验证），
-   这是 M3 收尾的真正瓶颈，不是代码量。
+   这是 M3 收尾的真正瓶颈，不是代码量。**注（v1.10）**：M3-1 的①已落地，真实客户端的请求序列
+   现在由 `trajectory_test.go` 自动回放；但回放能证明「端点都在、响应无 null」，
+   证明不了「真机上真的不报错」——真机实测仍不可替代。
 2. ✅ 已达成：兼容回归套件进 CI（`.github/workflows/ci.yml:49` 跑 `probe_theater.py --ci`）；
-   `go test -race ./...` 本地全绿。
+   **v1.10 起再叠一层**：`trajectory_test.go` 回放真实客户端轨迹（47 个端点），
+   断言「客户端走过的路不准 404」+ JSON 无 null；`go test -race ./...` 本地全绿。
 3. ⏳ 待实测：小幻影视 / SenPlayer / RodelPlayer 三端回归清单（§6）。
 4. ✅ 已达成：`grep -ri tmdb` 在代码与配置中只剩 `TMDBID` / `tmdb` 作为 **ProviderIds 标识字段**，
    无任何抓取实现承诺（M3-9）。
@@ -226,18 +232,19 @@ internal/
 
 ### M4 · 可运维与生态（≈ 10 天）
 
-> **v1.9 状态：M4-3（发布工程）与 M4-4（部署形态：Helm chart + compose 加固）已完成并进入 CHANGELOG `Unreleased`**，
-> 其余 M4-1/2/5/6/7 待做。落地要点见 §10「M4 执行记录」。
+> **v1.10 状态：M4 七项全部完成。** M4-3（发布工程）与 M4-4（Helm chart + compose 加固）已完成并进入 CHANGELOG `Unreleased`；
+> M4-1（Web 管理后台）、M4-2（可观测性）、M4-5（网盘适配器）、M4-6（strm）、M4-7（数据库方言）经 v1.10 复核**早已实现**，
+> 此前标 `⏳` 是清单漂移。落地要点见 §10「M4 执行记录」。
 
 | ID | 任务 | 说明 |
 |----|------|------|
-| M4-1 ⏳ | **Web 管理后台** | 内嵌静态页面（或独立前端），覆盖：条目 CRUD、批量导入、用户管理、播放源管理、系统状态。这是目前最大的易用性缺口 |
-| M4-2 ⏳ | 可观测性 | `/healthz`、`/metrics`（Prometheus）、结构化 JSON 日志、请求 trace id |
+| M4-1 ✅ | **Web 管理后台** | **v1.10 复核：已实现**。`internal/admin/` 提供内嵌静态后台（`web.go` + `web/index.html` + `app.js` + `styles.css`），走 `adminAuth()`（`/admin/`、`/admin/app.js`、`/admin/styles.css` 均有契约测试断言 401），覆盖条目与库管理、批量导入、用户管理、播放源与系统状态。不再是「只能 curl 打 API」 |
+| M4-2 ✅ | 可观测性 | **v1.10 复核：已实现**。`GET /healthz`（恒 200）与 `GET /readyz`（ping SQLite，不可达 503）在 `internal/api/emby/operations.go`；`GET /metrics` 输出 Prometheus 文本格式（`fakemby_http_requests_total` / `_duration_seconds_sum`，`adminAuth()` 保护）；结构化日志用 `slog.NewJSONHandler`；`OperationsMiddleware` 生成 `X-Request-ID` 并写入 `trace_id`（已在 `main.go` 与 `testutil` 注册，**不是定义了没接上**） |
 | M4-3 ✅ | 发布工程 | **v1.9 完成**：GoReleaser v2 多架构发布归档（amd64/arm64）+ SHA-256 校验和；tag 触发的 release workflow 向 `ghcr.io/<owner>/<repo>` 推送多平台镜像（先校验 Go 测试 / GoReleaser / Compose / Helm，PR 与手动运行只做校验）；语义化版本与 CHANGELOG 约定已写入仓库；Helm chart 作为发布资产随 GitHub Release 附带 |
 | M4-4 ✅ | 部署形态 | **v1.9 完成**：极简 Helm chart（Service、保留的 SQLite PVC 或既有 claim、引用既有 Secret、可选 ConfigMap、就绪/存活/启动探针、受限 pod/容器安全上下文）；compose 加固为只读根文件系统 + drop 全部 capabilities + no-new-privileges + 有界 tmpfs + 轮转日志 + 持久命名卷、默认 loopback 绑定（设 `FAKEMBY_BIND_ADDRESS` 开放）；Docker 构建用 Go 1.26.3 + BuildKit 目标平台参数，运行镜像 UID/GID 10001、仅含二进制与运行时包；secrets 改由 `FAKEMBY_ADMIN_API_KEY` / `FAKEMBY_PLAYBACK_SIGN_KEY` 注入，删除占位凭据与无用 scraper env |
-| M4-5 ⏳ | 网盘适配器 | 抽象 `SourceResolver` 接口：115 / OpenList / Alist / 直链；统一处理带 Referer/UA/签名鉴权的源 |
-| M4-6 ⏳ | strm 支持 | 媒体源为 `.strm` 时读取内部 URL 再重定向；支持本地 strm 目录扫描 |
-| M4-7 ⏳ | 数据库可选项 | 抽象 dialect，支持 Postgres/MySQL（大库场景 sqlite 会吃力） |
+| M4-5 ✅ | 网盘适配器 | **v1.10 复核：已实现**。`internal/infra/source` 定义 `SourceResolver` 接口并实现 `Direct`（直链 + 自定义 Referer/UA 等 `RequiredHttpHeaders`）、`OpenList`（含 Alist 的 `fs/get` 协议，带 Authorization）、`STRM`；由 `playback.go` 按源 `Protocol` 分派。115 未实现——其接口无公开文档且依赖登录态，属推测性工作，暂不引入 |
+| M4-6 ✅ | strm 支持 | **v1.10 复核：已实现**。`source.STRM` 读取 `.strm` 内 URL 后交给播放（`playback.go` 按 `Protocol=strm` 分派）；含路径穿越防护（`EvalSymlinks` + `Rel` 校验）、仅普通文件且 ≤64 KiB、只接受单行 URL；`Scan()` 支持本地 strm 目录扫描并派生稳定 ID |
+| M4-7 ✅ | 数据库可选项 | **v1.10 复核：已实现**。`internal/database/dialect.go` 按配置选择 `postgres.Open` / `mysql.New` / sqlite。**注意**：§7 明确「sqlite 单写前提不变，需要时再上 Postgres」，故仅 SQLite 有测试覆盖与真实验证，Postgres/MySQL 属「已接线但未实测」 |
 
 ---
 
@@ -452,8 +459,8 @@ FAKEMBY_SERVER_PORT=9999 ./fakemby &   # 期望监听 9999
 | M2-5 | ✅ | 图片缓存 key 含尺寸 `fmt.Sprintf("%s_%d_%dx%d.jpg", Type, Idx, maxWidth, maxHeight)`；新增 `enforceQuota()`：写入后 WalkDir 扫描，总大小超 `image.cache_max_mb` 配额时按 mtime 从旧到新淘汰。修 A6 |
 | M2-6 | ✅ | 进度缓冲 `flush()` 改为先快照 entries 再写事务，失败 return 保留缓冲；导出 `FlushProgressNow()` / `BufferProgress(userID, itemID, positionTicks, touch)`；新增 `POST /api/admin/progress/flush` 管理端点；`ShutdownProgressBuffer` 失败重试 3 次；flush 间隔读 `playback.flush_interval`（≤0 回落 30s）。修 A7 |
 | M2-7 | ✅ | 新增 `internal/infra/ratelimit`（进程内内存、按 IP+用户名固定窗口）：`New(maxAttempts, lockMinutes)` / `RecordFailure` / `Reset` / `IsLocked`；登录失败 `login_max_attempts` 次锁定 `login_lock_minutes` 分钟；Basic Auth 优先 `FindValidToken` 复用已有有效 token，不再每请求铸造（deviceID 统一为 `"BasicAuth"`）；默认 admin 创建时标记 `MustChangePassword=true`，登录响应 `ForcePasswordChange`；新增 `POST /api/admin/users/:userId/password` 改密并清除标记。修 A4/A5 |
-| M2-1 | ⏸️ | **本次未做**：按 §3 新建 `internal/api/emby` + `internal/api/admin` 并逐域搬迁。破坏性最大的跨里程碑工作，留待后续 |
-| M2-2 | ⏸️ | **本次未做**：抽出 `repo` 层接口、service 依赖接口而非 `*gorm.DB`。留待与 M2-1 一并推进 |
+| M2-1 | ✅ | **v1.10 复核：已完成**。按 §3 新建的 `internal/api/emby` + `internal/api/admin` 已是实际承载层，原 `internal/emby` 退化为纯转发门面（`facade.go` 里是 `var OperationsMiddleware = api.OperationsMiddleware` 这类别名），M2-3~M2-8 的后续修复也都落在新目录 |
+| M2-2 | ✅ | **v1.10 复核：已完成**。`internal/repo/` 已抽出（`auth`/`media`/`images`/`playback`/`search`），并被 `internal/service` 的 media/auth/image/playback/search 实际 import 消费，不再是「只建不用」 |
 
 **偏离说明（为何 M2-1/M2-2 跳过）**：
 
@@ -593,10 +600,41 @@ M3 期间若再现需专项排查。
    `x.F && x.F.length` / `x.F || []` 很常见。审计工具要能区分，否则会做一堆无用功，
    还会给所有响应平白增加字段。
 
-**M3-1 剩余**：把 `dist/server.log` 的真实请求序列解析成断言用例（当前以
-`clientFacingEndpoints` 清单手工固化，尚未做成 log 驱动）；`probe_theater.py` 已是可断言
-套件且已在 CI 中运行（`.github/workflows/ci.yml`），但**审计工具不进 CI**——它依赖本机
-安装的 Emby Theater 源码，Linux runner 上没有。
+**M3-1 ① log 驱动轨迹 · 已完成（2026-09-13）**
+
+把「人工清单」换成「真实客户端会话」。三件套：
+
+| 件 | 位置 | 作用 |
+|----|------|------|
+| 解析脚本 | `scripts/dev/log_trajectory.py` | 解析 `dist/server.log` 的 `msg="HTTP Request"` 记录，把 UUID/32-hex ID 归一化成 `{userId}`/`{itemId}`/`{sourceId}`/`{id}`，按首次出现顺序去重；剔除 `X-Emby-Token`/`api_key`（测试用请求头鉴权，写进轨迹既会过期又是凭据泄漏）与 `exp`/`sig`（一次性时效值）。**依赖本机日志 → 与审计工具一样不进 CI** |
+| 轨迹资产 | `internal/emby/testdata/theater_trajectory.json` | 纯数据、已提交。**125 条请求 → 47 个去重端点**，每条带 `count` 与真实遇到的 `statuses`。CI 里回放的就是它 |
+| 回放断言 | `internal/emby/trajectory_test.go` | 用种子数据绑定占位符后逐条回放，核心断言「**不准 404**」+ JSON 响应无 null（复用 `nullsafety_test.go` 的 `collectNulls` 与 `nullAllowlist`）。另有 `TestTrajectoryFixtureIsComplete` 做轨迹自测（防解析脚本静默退化成只吐 3 个端点） |
+
+**首轮回放即抓出 4 个真实 404（均已修）**——这正是 log 驱动相对人工清单的价值：
+
+| 端点 | 问题 | 修复 |
+|------|------|------|
+| `/emby/Items/{id}/ThemeMedia` | 详情页请求 5 次，未注册 | 新增，返回 `ThemeSongsResult`/`ThemeVideosResult`/`SoundtrackSongsResult` 三个空结果容器 |
+| `/emby/Users/{uid}/Items/{id}/SpecialFeatures` | 只注册了全局维度 `/emby/Items/{id}/SpecialFeatures` | 补用户维度写法（挂 `RequireUserMatch`） |
+| `/emby/Users/{uid}/Items/{id}/Intros` | 同上 | 补用户维度写法（挂 `RequireUserMatch`） |
+| `/emby/Items/{id}/Images` | 只注册了 `/Images/:type` 与 `/Images/:type/:index` | 新增图片清单端点，无图返回空数组 |
+
+**回放口径上踩到的三个坑**（都不是产品缺陷，是回放方法本身要注意的）：
+
+1. **身份要对上**：这次会话是管理员登录的，一开始用普通用户 token 回放，`/emby/Sessions` 得 403
+   被判成回归。轨迹必须按抓包时的身份回放，否则会把权限模型误判成 bug。
+2. **WebSocket 不能用普通 GET 回放**：没有 `Upgrade` 头必然 400，已跳过（由 `websocket_test.go` 覆盖）。
+3. **图片 404 是合法的**：条目没有某种图（如 Logo）时官方也返回 404，客户端只在 `ImageTags`
+   存在时才请求。图片类只要求「不 5xx」，不要求必须返回图——**可选内容 ≠ 结构性端点**。
+
+**两条记入白名单、明确不修**（`trajectoryNotActionable`，每条都写了理由，理由消失就该删）：
+
+- `/emby/emby/Videos/{id}/stream`（双 `/emby` 前缀）：当前 `DirectStreamUrl` 是
+  `/emby/Videos/{id}/stream`（`playback.go:279`），与 `playback.go:48` 注册的路由一致，
+  `contract_test`/`signature_test` 已覆盖 302 闭环；双前缀源于那次会话的**服务器地址带了
+  `/emby` 后缀**，属环境问题。**但那次会话 6 次起播全部 404，真机复测时必须确认直链能否起播**。
+- `/emby/Items/{id}/MetadataEditor`：服务端不提供元数据编辑（元数据由导入方直写，见 §7），
+  返回 404 而不是假装可编辑，避免客户端展示一个保存不了的界面。
 
 **M3-2 端点补全 · 进行中（v1.6 复核：旧清单严重过时）**
 
@@ -678,6 +716,23 @@ M3 期间若再现需专项排查。
 > 来源：`CHANGELOG.md` 的 `[Unreleased]` 段。本轮工作尚未打 release tag，
 > 故记为「已完成（Unreleased）」——代码与 CI 已落地，镜像/归档要等正式 tag 才发布。
 
+#### M4-1 / M4-2 / M4-5 / M4-6 / M4-7 复核 · 已完成（v1.10）
+
+这五项在 v1.9 之前一直标 `⏳`，2026-09-13 逐项复核**全部早已实现**——清单漂移，不是没做。
+证据（都能在代码里直接指到）与各自的边界：
+
+| ID | 状态 | 复核证据 | 边界 / 说明 |
+|----|------|----------|-------------|
+| M4-1 | ✅ | `internal/admin/web.go` + `internal/admin/web/{index.html,app.js,styles.css}`；`/admin/`、`/admin/app.js`、`/admin/styles.css` 在 `roadmap_test.go` 有契约测试断言 401 | 内嵌静态后台，挂 `adminAuth()` |
+| M4-2 | ✅ | `/healthz`、`/readyz`、`/metrics`（Prometheus 文本格式）在 `internal/api/emby/operations.go`；`slog.NewJSONHandler`；`OperationsMiddleware` 生成 `X-Request-ID` + `trace_id`，**已在 `cmd/fakemby/main.go:82` 与 `internal/testutil/server.go:80` 注册** | 复核时特意确认了「不是只定义没接上」——本项目多次栽在这类 fail-open 上 |
+| M4-5 | ✅ | `internal/infra/source`：`SourceResolver` 接口 + `Direct`（带 `RequiredHttpHeaders`，统一处理 Referer/UA/鉴权头）+ `OpenList`（含 Alist `fs/get`）+ `STRM`；`playback.go` 按 `Protocol` 分派 | **115 未实现**：接口无公开文档、依赖登录态，属推测性工作，暂不引入 |
+| M4-6 | ✅ | `source.STRM.Resolve`：路径穿越防护（`EvalSymlinks` + `Rel`）、仅普通文件且 ≤64 KiB、只接受单行 URL；`Scan()` 支持本地 strm 目录扫描并派生稳定 ID | `playback.strm_root` 未配置时明确报错禁用（不是静默放行） |
+| M4-7 | ✅ | `internal/database/dialect.go` 按配置选 `postgres.Open` / `mysql.New` / sqlite | §7 明确「sqlite 单写前提不变，需要时再上 Postgres」，故**只有 SQLite 有测试覆盖与真实验证**；另两种属「已接线但未实测」 |
+
+**教训（与 M3-2 同源）**：本轮已经是第三次发现「清单标待做、代码里早已实现」
+（M3-2 的 404 清单、M3-3 的 WebSocket、本次 M4 五项）。**标记完成状态前必须回代码里
+指到具体文件与行号**，只凭记忆或旧文档标注必然漂移。
+
 #### M4-3 发布工程 · 已完成
 
 | 项 | 落地要点 |
@@ -714,6 +769,32 @@ GoReleaser 产物写入 `dist/release`（与运行时 `dist` 分离），chart �
 ---
 
 ## 修订记录
+
+### v1.10（2026-09-13 M3-1 收尾 + M4 全量复核）
+
+1. **M3-1 三项全部完成**，最后一项「① log 驱动轨迹」落地：新增解析脚本
+   `scripts/dev/log_trajectory.py`（解析 `dist/server.log`，125 条请求 → 47 个去重端点，
+   归一化易变 ID、剔除 `X-Emby-Token`/`api_key`/`exp`/`sig`）、轨迹资产
+   `internal/emby/testdata/theater_trajectory.json`、回放断言
+   `internal/emby/trajectory_test.go`（核心断言「不准 404」+ JSON 无 null）。
+   分工沿用 M3-1 既有约定：**脚本依赖本机日志不进 CI，生成的纯数据轨迹文件进 CI**。
+2. **首轮回放即抓出 4 个真实 404 并修复**（这正是 log 驱动的价值）：
+   `/emby/Items/{id}/ThemeMedia`（未注册，详情页请求 5 次）、
+   `/emby/Users/{uid}/Items/{id}/SpecialFeatures` 与 `.../Intros`（只注册了全局维度写法）、
+   `/emby/Items/{id}/Images`（图片清单未注册）。均已补，带 `:userId` 的一律挂 `RequireUserMatch`。
+3. **两个「明确不修」进白名单并写清理由**：`/emby/emby/Videos/{id}/stream`（双 `/emby` 前缀，
+   源于那次会话服务器地址带了 `/emby`；当前直链与路由一致，但**该会话 6 次起播全部 404，
+   真机复测必须确认**）、`/emby/Items/{id}/MetadataEditor`（服务端不提供元数据编辑，404 是诚实结果）。
+4. **回放口径三个坑写进 §10**：轨迹必须按抓包身份回放（这次是管理员，用普通 token 会把
+   `/emby/Sessions` 的 403 误判成回归）；WebSocket 无 `Upgrade` 头必然 400，跳过；
+   图片 404 是合法的（可选内容 ≠ 结构性端点）。
+5. **M4 全量复核：M4-1/2/5/6/7 早已实现**，此前标 `⏳` 属清单漂移。M4 七项至此全部完成。
+   复核时特意确认 M4-2 的 `OperationsMiddleware` 已在 `main.go:82` 注册（防「定义了没接上」）。
+6. **M2-1 / M2-2 复核：已完成**。`internal/api/{emby,admin}` 已是实际承载层，原 `internal/emby`
+   退化为转发门面；`internal/repo/` 被 service 的 media/auth/image/playback/search 实际消费。
+7. **第三次记录同源教训**：标记完成状态前必须回代码指到具体文件与行号，只凭记忆必然漂移
+   （M3-2 的 404 清单、M3-3 的 WebSocket、本次 M4 五项）。
+8. **唯一未闭环项保留**：整轮修复仍待一次完整用户实测（M3-1~M3-6 至今没经过真机验证）。
 
 ### v1.9（2026-09-13 CHANGELOG → ROADMAP 同步）
 
