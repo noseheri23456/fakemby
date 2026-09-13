@@ -507,10 +507,21 @@ func getTokenFromRequest(c *gin.Context) string {
 		}
 	}
 
-	// 优先级 1: X-Emby-Token Header（官方实现）
-	if token := c.GetHeader("X-Emby-Token"); token != "" {
-		slog.Debug("从 X-Emby-Token Header 获取 Token")
-		return token
+	// X-MediaBrowser-Authorization：Emby 生态的旧协议头，语义与 X-Emby-Authorization 相同。
+	// 缺了这条，Kodi EmbyCon / 部分官方客户端会表现为"密码明明对，一直提示登录失败"。
+	if mbAuth := c.GetHeader("X-MediaBrowser-Authorization"); mbAuth != "" {
+		if token := extractTokenFromEmbyAuth(mbAuth); token != "" {
+			slog.Debug("✓ 从 X-MediaBrowser-Authorization Header 提取 Token")
+			return token
+		}
+	}
+
+	// 优先级 1: X-Emby-Token / X-MediaBrowser-Token Header（官方实现）
+	for _, h := range []string{"X-Emby-Token", "X-MediaBrowser-Token"} {
+		if token := c.GetHeader(h); token != "" {
+			slog.Debug("从 Token Header 获取 Token", "header", h)
+			return token
+		}
 	}
 
 	// 优先级 2: Authorization Header
@@ -588,24 +599,27 @@ func getTokenFromRequest(c *gin.Context) string {
 			}
 		}
 
-		// Emby 格式（通常用于登录请求）
-		if strings.HasPrefix(authHeader, "Emby ") {
-			if token := extractTokenFromEmbyAuth(authHeader); token != "" {
-				return token
-			}
-			slog.Debug("识别到 Emby 格式的 Authorization Header")
+		// Emby / MediaBrowser 认证串（登录请求与部分播放器都会用）
+		//   Authorization: Emby UserId="...", Client="...", Token="..."
+		//   Authorization: MediaBrowser Token="..."
+		// 注意必须放在 Bearer/Token/Basic 之后：这些前缀本身也可能是裸串。
+		if token := extractTokenFromEmbyAuth(authHeader); token != "" {
+			slog.Debug("从 Authorization 认证串提取 Token")
+			return token
 		}
 	}
 
 	// 优先级 3: 查询参数（某些客户端使用）
-	if token := c.Query("api_key"); token != "" {
-		slog.Debug("从查询参数 api_key 获取 Token")
-		return token
-	}
-
-	if token := c.Query("X-Emby-Token"); token != "" {
-		slog.Debug("从查询参数 X-Emby-Token 获取 Token")
-		return token
+	//
+	// 通道要铺够：不同客户端用的参数名不同，缺一个就表现为"直链/图片 401"。
+	// - api_key / apiKey / ApiKey：官方与第三方混用（大小写不敏感地都接受）
+	// - token：部分播放器与下载工具
+	// - X-Emby-Token / X-MediaBrowser-Token：与同名 Header 对应
+	for _, k := range []string{"api_key", "apiKey", "ApiKey", "X-Emby-Token", "X-MediaBrowser-Token", "token"} {
+		if token := c.Query(k); token != "" {
+			slog.Debug("从查询参数获取 Token", "param", k)
+			return token
+		}
 	}
 
 	slog.Debug("No authentication token", "path", c.Request.URL.Path, "method", c.Request.Method)
@@ -619,25 +633,36 @@ func min(a, b int) int {
 	return b
 }
 
-// extractTokenFromEmbyAuth 从 X-Emby-Authorization Header 中提取 Token
-// 格式: Emby UserId="...", Client="...", Token="..."
-func extractTokenFromEmbyAuth(xembyAuth string) string {
-	if !strings.HasPrefix(xembyAuth, "Emby ") {
+// extractTokenFromEmbyAuth 从 Emby / MediaBrowser 认证串中提取 Token。
+//
+// 兼容三种真实形态（按逗号切分后定位 Token= 段，能同时吃下它们）：
+//
+//	X-Emby-Authorization:  Emby UserId="...", Client="...", Token="..."
+//	Authorization:         MediaBrowser Token="..."
+//	Authorization:         Emby UserId="...", Token="..."
+//
+// 前两行是 Emby 生态的**真实协议格式**（官方客户端与 Kodi EmbyCon 都在用），
+// 早先只认 "Emby " 前缀 + ", " 分隔，拿到 MediaBrowser 形态会把整串当 token
+// 去比对，必然失败。
+func extractTokenFromEmbyAuth(authValue string) string {
+	v := strings.TrimSpace(authValue)
+	if v == "" {
 		return ""
 	}
+	for _, prefix := range []string{"MediaBrowser ", "Emby ", "Token "} {
+		if len(v) > len(prefix) && strings.EqualFold(v[:len(prefix)], prefix) {
+			v = strings.TrimSpace(v[len(prefix):])
+			break
+		}
+	}
 
-	parts := strings.Split(xembyAuth[5:], ", ")
-	for _, part := range parts {
-		kv := strings.SplitN(part, "=", 2)
+	for _, part := range strings.Split(v, ",") {
+		kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
 		if len(kv) != 2 {
 			continue
 		}
-
-		key := strings.TrimSpace(kv[0])
-		value := strings.Trim(strings.TrimSpace(kv[1]), "\"")
-
-		if key == "Token" {
-			return value
+		if strings.EqualFold(strings.TrimSpace(kv[0]), "Token") {
+			return strings.Trim(strings.TrimSpace(kv[1]), `"`)
 		}
 	}
 
