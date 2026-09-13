@@ -1,8 +1,6 @@
 package service
 
 import (
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -67,28 +65,16 @@ func (s *MediaService) ItemToDTO(item *database.MediaItem, userID string, includ
 	}
 
 	// 简化的 DTO，只包含必需字段
-	dto := &types.BaseItemDto{
-		ID:                item.ID,
-		Name:              item.Name,
-		Type:              item.Type,
-		IsFolder:          item.Type == "Series" || item.Type == "Season" || item.Type == "Folder" || item.Type == "CollectionFolder" || item.Type == "Person" || item.Type == "Genre" || item.Type == "Studio",
-		CanDelete:         !(item.Type == "Series" || item.Type == "Season" || item.Type == "Folder"),
-		CanDownload:       !(item.Type == "Series" || item.Type == "Season" || item.Type == "Folder"),
-		SupportsSync:      true,
-		Genres:            []string{},
-		Studios:           []types.NameIdPair{},
-		Tags:              []string{},
-		Taglines:          []string{},
-		People:            []types.PersonInfo{},
-		ImageTags:         map[string]string{},
-		BackdropImageTags: []string{},
-		MediaSources:      []types.MediaSourceDto{},
-		ProviderIds:       map[string]string{},
-		RemoteTrailers:    []types.ExternalUrl{},
-		ExternalUrls:      []types.ExternalUrl{},
-		LockedFields:      []string{},
-		GenreItems:        []types.NameIdPair{},
-	}
+	// 数组/map 字段的初始化集中在 types.NewBaseItemDto，避免新增字段时漏掉某处
+	base := types.NewBaseItemDto()
+	base.ID = item.ID
+	base.Name = item.Name
+	base.Type = item.Type
+	base.IsFolder = item.Type == "Series" || item.Type == "Season" || item.Type == "Folder" || item.Type == "CollectionFolder" || item.Type == "Person" || item.Type == "Genre" || item.Type == "Studio"
+	base.CanDelete = !(item.Type == "Series" || item.Type == "Season" || item.Type == "Folder")
+	base.CanDownload = base.CanDelete
+	base.SupportsSync = true
+	dto := &base
 
 	serverCfg := config.Get().Server
 	dto.ServerID = serverCfg.ID
@@ -204,11 +190,10 @@ func (s *MediaService) ItemToDTO(item *database.MediaItem, userID string, includ
 		dto.ProviderIds = nil
 	}
 
-	// 辅助函数：生成确定性的 32 位 MD5 字符串
-	generateDeterministicID := func(prefix, name string) string {
-		hash := md5.Sum([]byte(prefix + ":" + name))
-		return hex.EncodeToString(hash[:])
-	}
+	// 辅助函数：生成确定性的 32 位 MD5 字符串。
+	// 规则统一收敛到 database.VirtualItemID，与导入侧建虚拟条目的 ID 一致，
+	// 否则 ?PersonIds= / 分类筛选会静默失效。
+	generateDeterministicID := database.VirtualItemID
 
 	// 解析 JSON 字段 - 转换为 NameIdPair 对象
 	if (includeAll || shouldIncludeField(includeFields, "GenreItems") || shouldIncludeField(includeFields, "Genres")) && item.Genres != "" {
@@ -244,6 +229,22 @@ func (s *MediaService) ItemToDTO(item *database.MediaItem, userID string, includ
 		var tags []string
 		if err := json.Unmarshal([]byte(item.Tags), &tags); err == nil {
 			dto.Tags = tags
+		}
+	}
+
+	// 解析 Countries 数据（Emby 官方契约字段，客户端"国家/地区"筛选会用到）
+	if (includeAll || shouldIncludeField(includeFields, "Countries")) && item.Countries != "" {
+		var countries []string
+		if err := json.Unmarshal([]byte(item.Countries), &countries); err == nil {
+			dto.Countries = countries
+		}
+	}
+
+	// 解析 Languages 数据
+	if (includeAll || shouldIncludeField(includeFields, "Languages")) && item.Languages != "" {
+		var languages []string
+		if err := json.Unmarshal([]byte(item.Languages), &languages); err == nil {
+			dto.Languages = languages
 		}
 	}
 

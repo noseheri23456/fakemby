@@ -47,6 +47,8 @@ type ImportItem struct {
 	Overview        string              `json:"overview"`
 	Genres          []string            `json:"genres"`
 	Studios         []string            `json:"studios"`
+	Countries       []string            `json:"countries"`
+	Languages       []string            `json:"languages"`
 	Tags            []string            `json:"tags"`
 	Taglines        []string            `json:"taglines"`
 	ExternalUrls    []ImportExternalUrl `json:"external_urls"`
@@ -626,6 +628,7 @@ func planImportTree(tx *gorm.DB, library string, item ImportItem, parent *string
 	}{
 		{&row.Genres, item.Genres}, {&row.Studios, item.Studios}, {&row.Tags, item.Tags},
 		{&row.Taglines, item.Taglines}, {&row.ExternalUrls, item.ExternalUrls},
+		{&row.Countries, item.Countries}, {&row.Languages, item.Languages},
 	} {
 		data, _ := json.Marshal(field.value)
 		*field.dst = string(data)
@@ -653,21 +656,8 @@ func planImportTree(tx *gorm.DB, library string, item ImportItem, parent *string
 func writeImportTree(tx *gorm.DB, plan *importPlan) error {
 	item, row := plan.input, plan.row
 	virtual := func(prefix, name, kind string) (string, error) {
-		// Retain historical virtual IDs used by browse/search DTOs.
-		hash := md5.Sum([]byte(prefix + ":" + name))
-		id := hex.EncodeToString(hash[:])
-		var existing database.MediaItem
-		err := tx.Where("id = ?", id).First(&existing).Error
-		if err == nil {
-			if existing.Type != kind || existing.Name != name {
-				return "", errors.New("virtual item identity conflict")
-			}
-			return id, nil
-		}
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return "", err
-		}
-		return id, tx.Create(&database.MediaItem{ID: id, Name: name, Type: kind}).Error
+		// 规则统一收敛到 database.EnsureVirtualItem（见 internal/database/virtual.go）
+		return database.EnsureVirtualItem(tx, prefix, name, kind)
 	}
 	for _, genre := range item.Genres {
 		if _, err := virtual("genre", genre, "Genre"); err != nil {
@@ -704,7 +694,7 @@ func writeImportTree(tx *gorm.DB, plan *importPlan) error {
 		// Select all owned metadata, including zero values, without replacing the row or its creation time.
 		if err := tx.Model(&database.MediaItem{}).Where("id = ?", row.ID).
 			Select("Name", "OriginalTitle", "Overview", "Year", "PremiereDate", "CommunityRating", "OfficialRating",
-				"Genres", "Studios", "Tags", "Taglines", "ExternalUrls", "People", "ProviderIds", "TMDBID", "IMDBID", "TVDBID",
+				"Genres", "Studios", "Countries", "Languages", "Tags", "Taglines", "ExternalUrls", "People", "ProviderIds", "TMDBID", "IMDBID", "TVDBID",
 				"RuntimeTicks", "IsHidden", "SeasonNumber", "EpisodeNumber", "DateModified").Updates(&row).Error; err != nil {
 			return err
 		}

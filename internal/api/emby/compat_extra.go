@@ -28,15 +28,7 @@ func registerExtraCompat(r *gin.Engine, cfg *config.Config) {
 	})
 	r.GET("/emby/Genres", auth, taxonomy("Genre"))
 	r.GET("/emby/Studios", auth, taxonomy("Studio"))
-	r.GET("/emby/Persons/:itemId", auth, func(c *gin.Context) {
-		svc := scopedMediaService(c)
-		item, err := svc.GetItemByID(c.Param("itemId"))
-		if err != nil {
-			c.JSON(404, ErrNotFound)
-			return
-		}
-		c.JSON(200, svc.ItemToDTO(item, c.GetString("user_id"), nil))
-	})
+	r.GET("/emby/Persons/:personId", auth, personDetail())
 	r.GET("/emby/Playlists", auth, emptyItemsHandler())
 	r.GET("/emby/Collections", auth, emptyItemsHandler())
 
@@ -189,7 +181,12 @@ func taxonomy(kind string) gin.HandlerFunc {
 		}
 		out := []types.BaseItemDto{}
 		for _, n := range sorted[start:end] {
-			out = append(out, types.BaseItemDto{ID: fmt.Sprintf("%x", md5.Sum([]byte(strings.ToLower(kind)+":"+n))), Name: n, Type: kind, IsFolder: true})
+			dto := types.NewBaseItemDto()
+			dto.ID = fmt.Sprintf("%x", md5.Sum([]byte(strings.ToLower(kind)+":"+n)))
+			dto.Name = n
+			dto.Type = kind
+			dto.IsFolder = true
+			out = append(out, dto)
 		}
 		c.JSON(200, types.ItemsResponse{Items: out, TotalRecordCount: total, StartIndex: start})
 	}
@@ -233,4 +230,165 @@ func itemImages() gin.HandlerFunc {
 		}
 		c.JSON(200, out)
 	}
+}
+
+// peopleList 返回人物（演员/导演）列表。
+//
+// 此前这里是空桩（恒返回 0 条）。人物数据其实一直在库里：导入时会把 people
+// JSON 写进 media_items，并为每个人物建一条 type='Person' 的虚拟条目
+// （internal/api/admin/import.go 的 virtual 闭包，ID 同样是 md5("person:"+name)）。
+// 分析报告把这一条列为 FakEmby 与 nowen 的共同短板，缺了它"浏览演员"不可用。
+//
+// 实现上从**当前用户可见的条目**聚合，而不是直接查虚拟条目：虚拟条目没有
+// library_id，会被 access.Scope 的递归 CTE 判为不可见，直接查会全被过滤掉。
+// 这样也顺带保证了受限用户看不到被屏蔽库里的人物。
+func peopleList() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start, limit, ok := pageBounds(c)
+		if !ok {
+			return
+		}
+		var rows []database.MediaItem
+		if scopedMediaDB(c).Find(&rows).Error != nil {
+			c.JSON(500, ErrInternal)
+			return
+		}
+
+		type personAgg struct {
+			name  string
+			role  string
+			typ   string
+			tag   string
+			count int
+		}
+		byID := map[string]*personAgg{}
+		for _, r := range rows {
+			if r.People == "" {
+				continue
+			}
+			var people []types.PersonInfo
+			if err := json.Unmarshal([]byte(r.People), &people); err != nil {
+				continue
+			}
+			// 同一条目里同名人物只计一次（JSON 里可能重复出现）
+			seen := map[string]bool{}
+			for _, p := range people {
+				if p.Name == "" {
+					continue
+				}
+				id := p.ID
+				if id == "" {
+					id = personID(p.Name)
+				}
+				a, exists := byID[id]
+				if !exists {
+					a = &personAgg{name: p.Name, role: p.Role, typ: p.Type, tag: p.PrimaryImageTag}
+					byID[id] = a
+				}
+				if a.role == "" {
+					a.role = p.Role
+				}
+				if a.tag == "" {
+					a.tag = p.PrimaryImageTag
+				}
+				if !seen[id] {
+					a.count++
+					seen[id] = true
+				}
+			}
+		}
+
+		ids := make([]string, 0, len(byID))
+		for id := range byID {
+			ids = append(ids, id)
+		}
+		sort.Slice(ids, func(i, j int) bool { return byID[ids[i]].name < byID[ids[j]].name })
+
+		total := len(ids)
+		if start > total {
+			start = total
+		}
+		end := start + limit
+		if end > total {
+			end = total
+		}
+		out := []types.BaseItemDto{}
+		for _, id := range ids[start:end] {
+			a := byID[id]
+			dto := types.NewBaseItemDto()
+			dto.ID = id
+			dto.Name = a.name
+			dto.Type = "Person"
+			if a.typ != "" {
+				dto.Type = a.typ
+			}
+			if a.tag != "" {
+				dto.ImageTags = map[string]string{"Primary": a.tag}
+			}
+			out = append(out, dto)
+		}
+		c.JSON(200, types.ItemsResponse{Items: out, TotalRecordCount: total, StartIndex: start})
+	}
+}
+
+// personID 生成人物的确定性 ID。规则统一收敛到 database.VirtualItemID，
+// 与导入侧建虚拟条目、ItemToDTO 回填用的是同一个函数——三处不一致会导致
+// ?PersonIds= 筛选永远筛不到结果，且不报错。
+func personID(name string) string {
+	return database.VirtualItemID("person", name)
+}
+
+// personDetail 返回单个人物。
+//
+// 此前这里按"媒体 ID"查库（GetItemByID），而客户端点演员卡片时带的是人物 ID，
+// 服务端根本查不到 → 详情页报错。Emby 的 /Persons/{Id} 语义本来就是人物。
+func personDetail() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := c.Param("personId")
+		// 虚拟条目没有 library_id，会被访问作用域过滤掉，这里直接查全库；
+		// 它只有名字，不含媒体内容，不构成越权。
+		var person database.MediaItem
+		if database.Get().Where("id = ? AND type = ?", id, "Person").First(&person).Error == nil {
+			dto := types.NewBaseItemDto()
+			dto.ID = person.ID
+			dto.Name = person.Name
+			dto.Type = "Person"
+			var img database.Image
+			if database.Get().Where("item_id = ? AND type = ?", person.ID, "Primary").First(&img).Error == nil && img.Tag != "" {
+				dto.ImageTags = map[string]string{"Primary": img.Tag}
+			}
+			c.JSON(200, dto)
+			return
+		}
+		// 回退：老版本把人物 ID 之外的实体也指向这里，保持原有行为
+		svc := scopedMediaService(c)
+		item, err := svc.GetItemByID(id)
+		if err != nil {
+			c.JSON(404, ErrNotFound)
+			return
+		}
+		c.JSON(200, svc.ItemToDTO(item, c.GetString("user_id"), nil))
+	}
+}
+
+// resolveVirtualNames 把分类/人物的虚拟条目 ID 解析成名字。
+//
+// 客户端回传筛选条件时用的是 /emby/Genres、/emby/Persons 返回的 Id（md5 形态），
+// 而库里存的是名字，repo 层按名字做 LIKE 匹配——不解析就永远筛不到结果。
+// 虚拟条目没有 library_id，会被访问作用域过滤掉，所以这里直接查全库：
+// 它只有名字，不含媒体内容，不构成越权。
+func resolveVirtualNames(ids string) []string {
+	out := []string{}
+	for _, id := range strings.Split(ids, ",") {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		var item database.MediaItem
+		if database.Get().Where("id = ?", id).First(&item).Error != nil || item.Name == "" {
+			continue
+		}
+		out = append(out, item.Name)
+	}
+	return out
 }

@@ -28,6 +28,8 @@ type MediaItem struct {
 	OfficialRating  string
 	Genres          string `gorm:"type:text"` // JSON array
 	Studios         string `gorm:"type:text"` // JSON array
+	Countries       string `gorm:"type:text"` // JSON array
+	Languages       string `gorm:"type:text"` // JSON array
 	People          string `gorm:"type:text"` // JSON array
 	Tags            string `gorm:"type:text"` // JSON array
 	Taglines        string `gorm:"type:text"` // JSON array

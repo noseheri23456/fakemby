@@ -19,6 +19,8 @@ type CreateItemRequest struct {
 	Overview        string                   `json:"Overview"`
 	Year            *int                     `json:"Year"`
 	Genres          []string                 `json:"Genres"`
+	Countries       []string                 `json:"Countries"`
+	Languages       []string                 `json:"Languages"`
 	Studios         []string                 `json:"Studios"`
 	Tags            []string                 `json:"Tags"`
 	Taglines        []string                 `json:"Taglines"`
@@ -115,6 +117,17 @@ func createItem() gin.HandlerFunc {
 			item.Studios = string(studiosJSON)
 		}
 
+		// 保存 countries / languages 为 JSON
+		if len(req.Countries) > 0 {
+			countriesJSON, _ := json.Marshal(req.Countries)
+			item.Countries = string(countriesJSON)
+		}
+
+		if len(req.Languages) > 0 {
+			languagesJSON, _ := json.Marshal(req.Languages)
+			item.Languages = string(languagesJSON)
+		}
+
 		// 保存 tags 为 JSON
 		if len(req.Tags) > 0 {
 			tagsJSON, _ := json.Marshal(req.Tags)
@@ -127,10 +140,36 @@ func createItem() gin.HandlerFunc {
 			item.Taglines = string(taglinesJSON)
 		}
 
-		// 保存 people 为 JSON
+		// 保存 people 为 JSON。
+		//
+		// 必须与批量 import 走同一套规则：为每个人物补确定性 Id 并建 type='Person'
+		// 的虚拟条目。否则 /emby/Persons 列表里不会出现这些人，?PersonIds= 筛选
+		// 也会因为 JSON 里没有 Id 字段而永远筛不到（不报错，很难查）。
 		if len(req.People) > 0 {
-			peopleJSON, _ := json.Marshal(req.People)
+			normalized, err := normalizePeople(database.GetWrite(), req.People)
+			if err != nil {
+				slog.Error("规范化人物失败", "error", err)
+				c.JSON(http.StatusInternalServerError, ErrInternal)
+				return
+			}
+			peopleJSON, _ := json.Marshal(normalized)
 			item.People = string(peopleJSON)
+		}
+
+		// 分类虚拟条目：与 import 一致，保证 /emby/Genres、/emby/Studios 能看到
+		for _, g := range req.Genres {
+			if _, err := database.EnsureVirtualItem(database.GetWrite(), "genre", g, "Genre"); err != nil {
+				slog.Error("创建分类虚拟条目失败", "error", err)
+				c.JSON(http.StatusInternalServerError, ErrInternal)
+				return
+			}
+		}
+		for _, s := range req.Studios {
+			if _, err := database.EnsureVirtualItem(database.GetWrite(), "studio", s, "Studio"); err != nil {
+				slog.Error("创建工作室虚拟条目失败", "error", err)
+				c.JSON(http.StatusInternalServerError, ErrInternal)
+				return
+			}
 		}
 
 		if err := database.GetWrite().Create(item).Error; err != nil {
@@ -161,7 +200,7 @@ func updateItem() gin.HandlerFunc {
 			return
 		}
 
-		allowed := map[string]bool{"name": true, "overview": true, "original_title": true, "year": true, "premiere_date": true, "official_rating": true, "community_rating": true, "runtime_ticks": true, "is_hidden": true, "sort_name": true}
+		allowed := map[string]bool{"name": true, "overview": true, "original_title": true, "year": true, "premiere_date": true, "official_rating": true, "community_rating": true, "runtime_ticks": true, "is_hidden": true, "sort_name": true, "countries": true, "languages": true}
 		clean := map[string]any{}
 		for key, value := range updates {
 			column := database.Get().NamingStrategy.ColumnName("media_items", key)
@@ -284,4 +323,41 @@ func deleteSource() gin.HandlerFunc {
 
 		c.JSON(http.StatusOK, gin.H{"message": "Source deleted"})
 	}
+}
+
+// normalizePeople 规范化人物数组：补确定性 Id、落地头像、建 type='Person' 虚拟条目。
+//
+// 单条 CRUD 与批量 import 必须走同一套规则，否则会出现"导入的条目能按演员筛选、
+// 手动建的不能"这种难以定位的差异。ID 规则统一收敛在 database.VirtualItemID。
+func normalizePeople(tx *gorm.DB, people []map[string]interface{}) ([]map[string]any, error) {
+	out := make([]map[string]any, 0, len(people))
+	for _, p := range people {
+		name, _ := p["Name"].(string)
+		if name == "" {
+			continue
+		}
+		id, err := database.EnsureVirtualItem(tx, "person", name, "Person")
+		if err != nil {
+			return nil, err
+		}
+		info := map[string]any{"Name": name, "Id": id}
+		if t, ok := p["Type"].(string); ok && t != "" {
+			info["Type"] = t
+		}
+		if r, ok := p["Role"].(string); ok && r != "" {
+			info["Role"] = r
+		}
+		if url, ok := p["ImageUrl"].(string); ok && url != "" {
+			if err := tx.Where("item_id = ? AND type = ?", id, "Primary").Delete(&database.Image{}).Error; err != nil {
+				return nil, err
+			}
+			tag := generateImageTag(url)
+			if err := tx.Create(&database.Image{ItemID: id, Type: "Primary", URL: url, Tag: tag}).Error; err != nil {
+				return nil, err
+			}
+			info["PrimaryImageTag"] = tag
+		}
+		out = append(out, info)
+	}
+	return out, nil
 }

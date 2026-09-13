@@ -45,6 +45,8 @@ type BaseItemDto struct {
 	Studios        []NameIdPair `json:"Studios"`
 	Tags           []string     `json:"Tags"`
 	Taglines       []string     `json:"Taglines"`
+	Countries      []string     `json:"Countries"`
+	Languages      []string     `json:"Languages"`
 	People         []PersonInfo `json:"People"`
 
 	ImageTags               map[string]string `json:"ImageTags"`
@@ -219,4 +221,30 @@ type SearchHintDto struct {
 	ThumbImageTag     string   `json:"ThumbImageTag,omitempty"`
 	BackdropImageTags []string `json:"BackdropImageTags,omitempty"`
 	SeriesName        string   `json:"SeriesName,omitempty"`
+}
+
+// NewBaseItemDto 返回一个所有"面向客户端的数组/map 字段"都已初始化的 DTO。
+//
+// 官方客户端对这些字段裸调 .length / .includes / .filter，null 会直接 TypeError
+// 炸断渲染链（首页无限转圈或详情页 "Content no longer available"）。
+// 因此新增字段时必须同时改这里——集中一处比在每个构造点各写一遍更不容易漏。
+func NewBaseItemDto() BaseItemDto {
+	return BaseItemDto{
+		Genres:            []string{},
+		Studios:           []NameIdPair{},
+		GenreItems:        []NameIdPair{},
+		Tags:              []string{},
+		Taglines:          []string{},
+		Countries:         []string{},
+		Languages:         []string{},
+		People:            []PersonInfo{},
+		ImageTags:         map[string]string{},
+		BackdropImageTags: []string{},
+		MediaSources:      []MediaSourceDto{},
+		ProviderIds:       map[string]string{},
+		RemoteTrailers:    []ExternalUrl{},
+		ExternalUrls:      []ExternalUrl{},
+		LockedFields:      []string{},
+		Subviews:          []string{},
+	}
 }

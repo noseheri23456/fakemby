@@ -63,7 +63,8 @@ func RegisterItemRoutes(router *gin.Engine, cfg *config.Config) {
 	router.GET("/emby/items/counts", authMiddleware, countsHandler) // 小写版本
 
 	// 演员列表（小幻等客户端请求收藏演员）
-	router.GET("/emby/Persons", authMiddleware, getPersons())
+	// 此前是恒返回 0 条的空桩，改为从可见条目聚合（实现见 compat_extra.go 的 peopleList）
+	router.GET("/emby/Persons", authMiddleware, peopleList())
 }
 
 func getViews(mediaSvc *service.MediaService, cfg *config.Config) gin.HandlerFunc {
@@ -137,6 +138,8 @@ func libraryToDTO(cfg *config.Config, lib database.Library) types.BaseItemDto {
 		GenreItems:              []types.NameIdPair{},
 		Genres:                  []string{},
 		Studios:                 []types.NameIdPair{},
+		Countries:               []string{},
+		Languages:               []string{},
 		Tags:                    []string{},
 		Taglines:                []string{},
 		People:                  []types.PersonInfo{},
@@ -218,6 +221,8 @@ func getFolders(mediaSvc *service.MediaService) gin.HandlerFunc {
 				GenreItems:              []types.NameIdPair{},
 				Genres:                  []string{},
 				Studios:                 []types.NameIdPair{},
+				Countries:               []string{},
+				Languages:               []string{},
 				Tags:                    []string{},
 				Taglines:                []string{},
 				People:                  []types.PersonInfo{},
@@ -306,6 +311,20 @@ func getItems(mediaSvc *service.MediaService) gin.HandlerFunc {
 		yearsFilter := c.Query("Years")
 		personIdsFilter := c.Query("PersonIds")
 		studioIdsFilter := c.Query("StudioIds")
+
+		// 客户端回传筛选时用的是 /emby/Genres、/emby/Studios 返回的 Id（md5 形态），
+		// 而库里存的是名字——不解析成名字就会静默筛不到任何结果。
+		if genreIDs := c.Query("GenreIds"); genreIDs != "" {
+			if names := resolveVirtualNames(genreIDs); len(names) > 0 {
+				if genresFilter != "" {
+					genresFilter += ","
+				}
+				genresFilter += strings.Join(names, ",")
+			}
+		}
+		if names := resolveVirtualNames(studioIdsFilter); len(names) > 0 {
+			studioIdsFilter = strings.Join(names, ",")
+		}
 
 		// 获取数据
 		var parentIDPtr *string
@@ -497,16 +516,6 @@ func getItemCounts(mediaSvc *service.MediaService) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, counts)
-	}
-}
-
-// getPersons 返回演员列表（目前返回空列表，满足客户端请求）
-func getPersons() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.JSON(http.StatusOK, types.ItemsResponse{
-			Items:            []types.BaseItemDto{},
-			TotalRecordCount: 0,
-		})
 	}
 }
 
