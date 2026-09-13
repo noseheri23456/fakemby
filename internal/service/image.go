@@ -80,7 +80,7 @@ func (s *ImageService) getImageFromCache(img database.Image, maxWidth, maxHeight
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
 		return "", fmt.Errorf("image origin status %d", resp.StatusCode)
 	}
@@ -125,7 +125,7 @@ func (s *ImageService) getImageFromCache(img database.Image, maxWidth, maxHeight
 		return "", err
 	}
 	tmp := f.Name()
-	defer os.Remove(tmp)
+	defer func() { _ = os.Remove(tmp) }()
 	if _, err = f.Write(data); err != nil {
 		_ = f.Close()
 		return "", err

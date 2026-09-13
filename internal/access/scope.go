@@ -62,11 +62,11 @@ func queryTable(builder clause.Builder) string {
 func (s policyScope) Build(builder clause.Builder) {
 	table := queryTable(builder)
 	if table != "media_items" && table != "libraries" {
-		builder.WriteString("1=1")
+		_, _ = builder.WriteString("1=1")
 		return
 	}
 	if !s.valid || s.policy.IsDisabled {
-		builder.WriteString("1=0")
+		_, _ = builder.WriteString("1=0")
 		return
 	}
 	if table == "libraries" {
@@ -77,9 +77,9 @@ func (s policyScope) Build(builder clause.Builder) {
 	// cycle. Denial propagates to every descendant, including unrated episodes
 	// below a restricted series and items with inconsistent library metadata.
 	builder.WriteQuoted(clause.Column{Table: clause.CurrentTable, Name: "id"})
-	builder.WriteString(" NOT IN (WITH RECURSIVE access_denied(id) AS (SELECT access_item.id FROM media_items AS access_item WHERE NOT COALESCE((")
+	_, _ = builder.WriteString(" NOT IN (WITH RECURSIVE access_denied(id) AS (SELECT access_item.id FROM media_items AS access_item WHERE NOT COALESCE((")
 	s.policy.itemPredicate().Build(builder)
-	builder.WriteString("), FALSE) UNION SELECT access_child.id FROM media_items AS access_child JOIN access_denied ON access_child.parent_id = access_denied.id) SELECT id FROM access_denied)")
+	_, _ = builder.WriteString("), FALSE) UNION SELECT access_child.id FROM media_items AS access_child JOIN access_denied ON access_child.parent_id = access_denied.id) SELECT id FROM access_denied)")
 }
 
 func (p Policy) libraryPredicate(column clause.Column) clause.Expression {
@@ -138,6 +138,6 @@ func (p itemPredicate) Build(builder clause.Builder) {
 	if queryTable(builder) == "media_items" {
 		p.expr.Build(builder)
 	} else {
-		builder.WriteString("1=1")
+		_, _ = builder.WriteString("1=1")
 	}
 }

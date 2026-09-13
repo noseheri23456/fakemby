@@ -116,10 +116,14 @@ func TestSignIsDeterministicForSameExp(t *testing.T) {
 	s := New("secret", 3600)
 	p := Payload{MediaType: "video", ItemID: "i", SourceID: "s", UserID: "u"}
 	exp := int64(1_800_000_000)
-	if s.sign(p.String(), exp) != s.sign(p.String(), exp) {
+	// 注意：不能写成 s.sign(...) != s.sign(...)，左右表达式字面上相同时
+	// staticcheck 会判为恒 false（SA4000），断言就空转了——必须先落到变量里。
+	first := s.sign(p.String(), exp)
+	second := s.sign(p.String(), exp)
+	if first != second {
 		t.Fatal("同一 payload + 同一 exp 应得到相同签名")
 	}
-	if s.sign(p.String(), exp) == s.sign(p.String(), exp+1) {
+	if first == s.sign(p.String(), exp+1) {
 		t.Fatal("exp 参与签名，不同 exp 应得到不同签名")
 	}
 }

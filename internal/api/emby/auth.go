@@ -626,13 +626,6 @@ func getTokenFromRequest(c *gin.Context) string {
 	return ""
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // extractTokenFromEmbyAuth 从 Emby / MediaBrowser 认证串中提取 Token。
 //
 // 兼容三种真实形态（按逗号切分后定位 Token= 段，能同时吃下它们）：

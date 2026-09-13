@@ -59,7 +59,11 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # golangci-lint 二进制的构建 Go 版本必须 >= go.mod 里的 go 指令，
+      # 否则会直接报 "the Go language version (goX) used to build golangci-lint is lower
+      # than the targeted Go version" 并以 exit 3 中止（v2.4.0 用 go1.25 构建，本仓库是 go 1.26.3）。
+      # v2.13.2 用 go1.27.0 构建，升级 Go 版本时记得同步检查这一点。
       - uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.4.0
+          version: v2.13.2
           args: --timeout=5m

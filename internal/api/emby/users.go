@@ -217,7 +217,7 @@ func deleteUserCore() gin.HandlerFunc {
 				return err
 			}
 			return tx.Delete(&user).Error
-		}).Error; err != nil {
+		}); err != nil {
 			slog.Error("Failed to delete user", "error", err)
 			c.JSON(http.StatusInternalServerError, ErrInternal)
 			return

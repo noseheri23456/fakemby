@@ -71,7 +71,7 @@ func (s *MediaService) ItemToDTO(item *database.MediaItem, userID string, includ
 	base.Name = item.Name
 	base.Type = item.Type
 	base.IsFolder = item.Type == "Series" || item.Type == "Season" || item.Type == "Folder" || item.Type == "CollectionFolder" || item.Type == "Person" || item.Type == "Genre" || item.Type == "Studio"
-	base.CanDelete = !(item.Type == "Series" || item.Type == "Season" || item.Type == "Folder")
+	base.CanDelete = item.Type != "Series" && item.Type != "Season" && item.Type != "Folder"
 	base.CanDownload = base.CanDelete
 	base.SupportsSync = true
 	dto := &base
@@ -656,29 +656,6 @@ func (s *MediaService) enrichItemCounts(dto *types.BaseItemDto, itemID string) {
 			dto.ChildCount = &count
 		}
 	}
-}
-
-// getLibrariesAsItems 将媒体库转换为 MediaItem 列表（用于首页浏览）
-func (s *MediaService) getLibrariesAsItems() ([]database.MediaItem, int64, error) {
-	libs, err := s.repository.GetLibraries()
-	if err != nil {
-		return nil, 0, err
-	}
-
-	items := make([]database.MediaItem, 0, len(libs))
-	for _, lib := range libs {
-		item := database.MediaItem{
-			ID:   lib.ID,
-			Name: lib.Name,
-			Type: "CollectionFolder",
-		}
-		if lib.Type == "tvshows" {
-			item.Type = "CollectionFolder"
-		}
-		items = append(items, item)
-	}
-
-	return items, int64(len(items)), nil
 }
 
 // normalizePremiereDate 确保日期字符串符合 ISO 8601 格式

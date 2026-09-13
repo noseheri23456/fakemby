@@ -30,6 +30,7 @@
 
 ### Fixed
 
+- Admin user deletion no longer reports success unconditionally. `db.Transaction(...)` already returns an `error`; the extra `.Error` access took that error's `Error` method value, which is never `nil`, so every failure was swallowed and the endpoint always answered `204`.
 - `/emby/Branding/Configuration` no longer requires authentication; web clients fetch it from the login page before a token exists, so every request returned 401.
 - `/emby/Sessions/Capabilities` (the non-`Full` variant) is now available anonymously and accepts GET, POST, and HEAD; clients report device capabilities during the login handshake, often before holding a valid token.
 - `Authorization: MediaBrowser Token="..."` and the `X-MediaBrowser-*` headers were not parsed. The whole authorization string was compared as a token, which made valid credentials fail repeatedly with no obvious cause.

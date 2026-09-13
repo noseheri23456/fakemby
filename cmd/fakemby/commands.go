@@ -43,7 +43,7 @@ func command(cfg *config.Config) (bool, error) {
 		if err != nil {
 			return true, err
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		err = json.NewEncoder(f).Encode(map[string]any{"library": "STRM", "items": entries})
 		if err == nil {
 			err = f.Sync()
@@ -66,14 +66,14 @@ func command(cfg *config.Config) (bool, error) {
 	if err != nil {
 		return true, err
 	}
-	defer sqlDB.Close()
+	defer func() { _ = sqlDB.Close() }()
 	sqlDB.SetMaxOpenConns(1)
 	if op == "export" {
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 		if err != nil {
 			return true, err
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		if err = transfer.Export(d, cfg, f); err == nil {
 			err = f.Sync()
 		}
@@ -83,7 +83,7 @@ func command(cfg *config.Config) (bool, error) {
 	if err != nil {
 		return true, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if err = database.Migrate(d); err != nil {
 		return true, err
 	}
@@ -97,7 +97,7 @@ func command(cfg *config.Config) (bool, error) {
 	if err != nil {
 		return true, fmt.Errorf("database restored but config output could not be created: %w", err)
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 	err = json.NewEncoder(out).Encode(restored)
 	fmt.Fprintln(os.Stderr, "Snapshot restored. Configure new admin/signing keys; previous tokens were intentionally not restored.")
 	return true, err

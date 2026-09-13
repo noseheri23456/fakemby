@@ -557,7 +557,7 @@ func resolveImportIdentity(tx *gorm.DB, library string, item ImportItem, parent 
 	}
 	if found {
 		if !sameImportScope(existing, library, item.Type, parent) {
-			return database.MediaItem{}, false, errors.New("Id belongs to a different library, type or parent")
+			return database.MediaItem{}, false, errors.New("id belongs to a different library, type or parent")
 		}
 		matches[id] = existing
 	}
@@ -566,7 +566,7 @@ func resolveImportIdentity(tx *gorm.DB, library string, item ImportItem, parent 
 	}
 	for _, row := range matches {
 		if item.ID != "" && row.ID != item.ID {
-			return database.MediaItem{}, false, errors.New("Id conflicts with the existing provider identity")
+			return database.MediaItem{}, false, errors.New("id conflicts with the existing provider identity")
 		}
 		if item.ID == "" {
 			stored := storedImportProviders(row)

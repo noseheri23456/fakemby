@@ -74,7 +74,7 @@ func (a OpenList) Resolve(ctx context.Context, path string) (Result, error) {
 	if err != nil {
 		return Result{}, errors.New("source resolver request failed")
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
 		return Result{}, fmt.Errorf("source resolver status %d", resp.StatusCode)
 	}
@@ -125,7 +125,7 @@ func (s STRM) Resolve(ctx context.Context, path string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	st, err := f.Stat()
 	if err != nil || !st.Mode().IsRegular() || st.Size() > 65536 {
 		return Result{}, errors.New("STRM must be a regular file no larger than 64 KiB")

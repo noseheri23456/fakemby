@@ -33,7 +33,7 @@ func Setup(cfg *config.Config) (*slog.Logger, error) {
 		writers = append(writers, f)
 	}
 
-	var w io.Writer = writers[0]
+	w := writers[0]
 	if len(writers) > 1 {
 		w = io.MultiWriter(writers...)
 	}
