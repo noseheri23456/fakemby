@@ -39,6 +39,15 @@ func registerExtraCompat(r *gin.Engine, cfg *config.Config) {
 	})
 	r.GET("/emby/Playlists", auth, emptyItemsHandler())
 	r.GET("/emby/Collections", auth, emptyItemsHandler())
+
+	// M3-1（log 驱动轨迹发现）：以下路径变体在真实 Emby Theater 会话里出现过，
+	// 但此前只注册了「全局维度」的写法 → 客户端拿到 404，炸断详情页 Promise 链。
+	// 带 :userId 的一律挂归属校验（M0-5 约定）。
+	owner := RequireUserMatch("userId")
+	r.GET("/emby/Users/:userId/Items/:itemId/SpecialFeatures", auth, owner, emptyArrayHandler())
+	r.GET("/emby/Users/:userId/Items/:itemId/Intros", auth, owner, emptyItemsHandler())
+	r.GET("/emby/Items/:itemId/ThemeMedia", auth, themeMedia())
+	r.GET("/emby/Items/:itemId/Images", auth, itemImages())
 }
 func pageBounds(c *gin.Context) (int, int, bool) {
 	start, e1 := strconv.Atoi(c.DefaultQuery("StartIndex", "0"))
@@ -183,5 +192,45 @@ func taxonomy(kind string) gin.HandlerFunc {
 			out = append(out, types.BaseItemDto{ID: fmt.Sprintf("%x", md5.Sum([]byte(strings.ToLower(kind)+":"+n))), Name: n, Type: kind, IsFolder: true})
 		}
 		c.JSON(200, types.ItemsResponse{Items: out, TotalRecordCount: total, StartIndex: start})
+	}
+}
+
+// themeMedia 对应 /emby/Items/{id}/ThemeMedia。
+//
+// 官方返回主题歌曲 / 主题视频的查询容器。我们不提供主题媒体，但客户端在详情页
+// 会请求它（真实轨迹里请求了 5 次）——返回空结果而不是 404。
+// Items 必须是**空数组**：客户端裸调 `.length`，nil 切片会被序列化成 null 直接崩
+// （正是 M3-1 总闸 nullsafety_test.go 要根除的模式）。
+func themeMedia() gin.HandlerFunc {
+	empty := types.ItemsResponse{Items: []types.BaseItemDto{}, TotalRecordCount: 0}
+	return func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"ThemeSongsResult":      empty,
+			"ThemeVideosResult":     empty,
+			"SoundtrackSongsResult": empty,
+		})
+	}
+}
+
+// itemImages 对应 /emby/Items/{id}/Images：返回条目已有的图片清单。
+//
+// 详情页与图片管理器会请求它。没有图片时返回空数组而不是 404——
+// 客户端会把「无图」的 404 当成「条目不存在」，表现同样是详情页报错。
+func itemImages() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var rows []database.Image
+		if database.Get().Where("item_id = ?", c.Param("itemId")).Order("type, idx").Find(&rows).Error != nil {
+			c.JSON(500, ErrInternal)
+			return
+		}
+		out := make([]gin.H, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, gin.H{
+				"ImageType":  r.Type,
+				"ImageIndex": r.Idx,
+				"ImageTag":   r.Tag,
+			})
+		}
+		c.JSON(200, out)
 	}
 }
