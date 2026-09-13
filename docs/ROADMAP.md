@@ -4,7 +4,8 @@
 > 适用对象：本仓库当前代码基线（master，tag `v0.9.0-pre`）
 > 目标：把「能跑通的 Emby 兼容层」推进为「可公开部署、可长期维护的产品级服务」
 >
-> **进度：M0 已完成并通过验收（26/26）；M1 已完成（service 71% / signer 96% 覆盖）；M2 已完成（M2-1/M2-2 结构性重构已随 `internal/api/{emby,admin}` + `internal/repo` 落地，原 `internal/emby` 只剩转发门面）；M3 九项全部完成（M3-1 最后一项「log 驱动轨迹」已落地：解析真实客户端日志生成轨迹资产并回放断言）；M4 七项全部完成（M4-1/2/5/6/7 经 v1.10 复核早已实现，M4-3/M4-4 已完成并进入 CHANGELOG `Unreleased`）。v1.4 移除刮削器需求，主线改为「官方客户端兼容基线」。详见 §10 执行记录与 §7 不做清单。**
+> **进度：M0 已完成并通过验收（26/26）；M1 已完成（service 71% / signer 96% 覆盖）；M2 已完成（M2-1/M2-2 结构性重构已随 `internal/api/{emby,admin}` + `internal/repo` 落地，原 `internal/emby` 只剩转发门面）；M3 九项全部完成（M3-1 最后一项「log 驱动轨迹」已落地：解析真实客户端日志生成轨迹资产并回放断言）；M4 七项全部完成（M4-1/2/5/6/7 经 v1.10 复核早已实现，M4-3/M4-4 已完成并进入 CHANGELOG `Unreleased`）。v1.4 移除刮削器需求，主线改为「官方客户端兼容基线」。
+> 另：2026-09-13 依据三份对照分析报告完成一轮**端点 + 数据库补齐**（路径规范化中间件、`/original`、登录页公开端点、token 多通道、`/Persons` 真实聚合、虚拟条目 ID 收敛；**明确排除依赖转码的能力**），详见 §10 末尾「兼容性补齐」。**
 >
 > **⚠️ 唯一未闭环项：整轮修复仍待一次完整用户实测**——M3-1~M3-6 的修复至今没经过一轮真机验证，缺的不是代码而是验证。
 
@@ -768,7 +769,90 @@ GoReleaser 产物写入 `dist/release`（与运行时 `dist` 分离），chart �
 
 ---
 
+### 兼容性补齐 · 端点 + 数据库（2026-09-13，依据三份对照分析报告）
+
+> 输入：`fakemby-emby-compat-plan.md`、`fakemby-vs-mediastationgo-endpoints.md`、
+> `fakemby-metadata-support-comparison.md`（与 nowen-video / MediaStationGo 静态提取对照）。
+> 用户给定的边界：**补端点、补数据库，但不引入依赖转码的能力**。
+> 因此真 HLS 分片/转码管线一律不做；`/original` 与伪 m3u8 都只指向既有直链，零转码。
+
+**先实测再动手的收获（清单又一次漂移）**：
+
+- 分析报告 §4 判定「`/Users/Me`、`/Users/Current`、`/System/Configuration` 公开、需收回鉴权」
+  —— 实际三者**早已挂 `AuthTokenMiddleware`**（`auth.go:201/204`、`system.go:57`），属报告误判，未改。
+- 报告说 `/Genres`、`/Studios` 返回"裸字符串数组"——实际 `taxonomy()` 早已返回
+  `ItemsResponse{Items: [BaseItemDto]}`。真实缺口是**客户端回传 Id 时筛选不到**（库里存的是名字）。
+
+**端点侧（`internal/api/emby/compat_msgo.go`）**：
+
+| 类别 | 内容 |
+|------|------|
+| 路径规范化 | 新增 `pathnormalize.go`：`NewEmbyPathNormalizer` 从 gin 路由表反查，补 `/emby` 前缀 + 大小写归一 + `/socket` 别名，**替换**原先只有 7 条硬编码映射的 `CaseInsensitiveHandler`（覆盖 7/74）。按真实路由表匹配而非维护映射，新增端点自动生效 |
+| 播放 | `/Videos/{id}/original`（+`:container`）、`stream`/`original` 的 **HEAD**（VLC 等先探测）、无 `mediaSourceId` 的字幕变体 |
+| 伪 HLS | `master.m3u8` / `main.m3u8` 返回单码率 playlist，`URI` 指向 `/stream`——宣告支持 HLS 但**不产生任何分片、不转码** |
+| 登录页序列 | `Localization/{Cultures,Countries,Options,ParentalRatings}`、`Startup/Configuration`、`Branding/Css(.css)`、`web/manifest.json`、`System/Ext/ServerDomains` 全部**公开**（此前 404/401 会打断登录页） |
+| 鉴权修正 | `Branding/Configuration` 去掉 `auth`（Web 客户端在登录页无条件拉取，此前必 401）；新增公开的 `/Sessions/Capabilities`（非 `/Full`）；`System/Ping` 补 POST/HEAD |
+| 图片 | `Items/{id}/Images/*` 从强制 token 改为 `playbackAuth`（token 或签名任一有效）——修 Infuse 缓存 URL 丢 token 导致海报整片 404 |
+| 其它 | `/Items/{id}` 裸路径详情、`/Library/MediaFolders`、`/Items/Latest`、`/Items/Resume`、`/Users/{uid}/Items/Counts`、`/Users/{uid}/Shows/{id}/{Seasons,Episodes}`、`/DisplayPreferences/{id}`、`/MediaSegments/{id}`、`Playback/BitrateTest`、根探活 `/emby` |
+
+**Token 通道（`auth.go`）**：补 `X-MediaBrowser-Token`、`X-MediaBrowser-Authorization`、
+`Authorization: MediaBrowser Token="..."`、`?apiKey=` / `?ApiKey=` / `?token=`。
+`extractTokenFromEmbyAuth` 此前只认 `"Emby "` 前缀且按 `", "` 分割，
+拿到 MediaBrowser 形态会把整串当 token —— 表现为"密码正确却一直登录失败"。
+
+**数据库侧**：
+
+1. **`/emby/Persons` 从空桩改为真实聚合**。人物数据一直在库里（导入时写 `people` JSON +
+   `type='Person'` 虚拟条目），只是没暴露。实现上从**当前用户可见条目**聚合，而不是查虚拟条目：
+   虚拟条目没有 `library_id`，会被 `access.Scope` 的递归 CTE 判为不可见，直接查会全被过滤掉。
+2. **`/emby/Persons/{id}` 语义修正**：此前按"媒体 ID"查库，而客户端点演员卡片带的是人物 ID
+   → 详情页报错。现改查人物；路由参数改名 `:personId`，避免被访问控制当媒体 ID 校验（此前 403）。
+3. **ID 规则收敛到 `database.VirtualItemID` / `EnsureVirtualItem`**（新增 `internal/database/virtual.go`）。
+   此前导入侧、DTO 回填、列表接口各拼一次 `md5(prefix+":"+name)`，不一致就会导致
+   `?PersonIds=` 永远筛不到且不报错——典型的静默失效。
+4. **单条 CRUD 与批量 import 走同一套规则**：`admin/items.go` 建条目时同样补人物 Id、
+   建 genre/studio/person 虚拟条目（此前只有 import 会建，手动建的条目筛不到）。
+5. **支持 `GenreIds` / `StudioIds`**：客户端回传的是 Id，库里存名字，新增 `resolveVirtualNames` 解析。
+6. **`MediaItem` 补 `Countries` / `Languages`**（Emby 官方契约字段，客户端筛选会用），
+   贯通模型 → DTO → 导入 → CRUD → 解析。
+7. **新增 `types.NewBaseItemDto()`**：集中初始化所有面向客户端的数组/map 字段。
+   加完 Countries/Languages 后 null 总闸立刻抓到 3 处构造点漏初始化——集中一处后不会再漏。
+
+**顺带修掉的两处工程隐患**：
+
+- **路由清单两份**：`main.go` 与测试服务各注册一遍，本次新增的 5 个端点在测试里全是 404。
+  抽出 `internal/router.RegisterAll` 供两边共用。
+- **测试中间件与生产不一致**：测试服务还在用旧的 `CaseInsensitiveHandler`，
+  导致"无 `/emby` 前缀""大小写变体"两类真实行为在测试里根本没被覆盖。已统一。
+
+**未做（明确排除）**：真 HLS 分片与转码（依赖 ffmpeg，会推翻"302 直链、零带宽"的前提）；
+NFO 读写、本地图片扫描（属"扫库/刮削"，与 §7 定位冲突）；元数据编辑端点。
+
+**回归**：新增 `internal/emby/compat_msgo_test.go`（9 个用例：路径规范化 3、
+播放端点、伪 HLS 不产分片、登录页公开端点、DisplayPreferences、MediaFolders、
+8 条 token 通道、人物列表/筛选/详情+GenreIds 筛选）。
+`go build` / `go vet` / `gofmt` / `go test ./...` 全绿（含 null 总闸与轨迹回放）。
+
+---
+
 ## 修订记录
+
+### v1.11（2026-09-13 端点 + 数据库补齐，依据对照分析报告）
+
+1. 依据三份对照分析报告补齐端点与数据库能力，**边界是不引入依赖转码的能力**：
+   真 HLS 分片/转码一律不做，`/original` 与伪 m3u8 都只指向既有直链。
+2. 分析报告同样有漂移：「/Users/Me、/Users/Current、/System/Configuration 公开需收回鉴权」
+   经核对**早已挂鉴权**，未改；「Genres 返回裸数组」也已过时。**第四次印证：先实测再动手。**
+3. 路径规范化改为按 gin 路由表反查（`NewEmbyPathNormalizer`），替换只有 7 条映射的
+   `CaseInsensitiveHandler`，新增端点自动生效，不再需要维护映射清单。
+4. 数据库侧把"已有数据但没暴露"的能力接上：`/emby/Persons` 由空桩改真实聚合、
+   `/emby/Persons/{id}` 语义修正；虚拟条目 ID 规则收敛到 `database.VirtualItemID`，
+   消除三处各拼一次 md5 的漂移（不一致 = `?PersonIds=` 静默失效）。
+5. 加完新字段后 null 总闸立刻抓到 3 处构造点漏初始化 —— 新增 `types.NewBaseItemDto()`
+   集中初始化，防止重演。
+6. 顺带根治两处工程隐患：路由清单 `main.go` 与测试各一份 → 抽 `internal/router.RegisterAll`；
+   测试用旧中间件 → 统一为生产同一个。
+7. 仍需一次完整真机实测（本轮改动均在测试环境验证，未见真实客户端）。
 
 ### v1.10（2026-09-13 M3-1 收尾 + M4 全量复核）
 

@@ -6,7 +6,7 @@
 
 ## 特性
 
-- **Emby API 兼容** —— 40+ 端点，官方 Emby Theater 与第三方客户端（小幻影视 / SenPlayer / RodelPlayer 等）可用
+- **Emby API 兼容** —— 100+ 端点，官方 Emby Theater 与第三方客户端（小幻影视 / SenPlayer / RodelPlayer / Infuse 等）可用；自动兼容不带 `/emby` 前缀与大小写混排的请求路径，并支持 `X-Emby-Token`、`Authorization: MediaBrowser Token="..."` 等多种 token 携带方式
 - **零带宽串流** —— 302 重定向到外部源，服务端不中转视频流量
 - **智能图片** —— `redirect`（零带宽）或 `proxy_cache`（服务端代取 + 本地缓存 + 缩放）两种模式
 - **播放进度同步** —— 内存缓冲 + 批量落库，进程优雅关闭前自动 flush，避免 SQLite 锁冲突

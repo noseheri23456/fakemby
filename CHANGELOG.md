@@ -7,14 +7,36 @@
 - M4-3: Linux amd64/arm64 release archives with SHA-256 checksums using GoReleaser v2, plus a versioned Helm chart attached to GitHub Releases.
 - M4-3: A tag-triggered release workflow builds and publishes multi-platform images to `ghcr.io/<repository-owner>/<repository-name>`. It validates Go tests, GoReleaser configuration, Compose, and Helm before publication. Pull requests affecting release assets and manual workflow runs validate only.
 - M4-4: A minimal Helm chart with a Service, retained SQLite PVC (or existing claim), existing Secret references, optional configuration ConfigMap, startup/readiness/liveness probes, and restricted pod/container security contexts.
+- Emby API compatibility: `GET/HEAD /emby/Videos/{id}/original` (with optional container suffix) and HEAD support for `/emby/Videos/{id}/stream`, so clients that prefer `original` (most 2025-era players) can start playback instead of receiving 404/405.
+- Emby API compatibility: pseudo-HLS playlists at `/emby/Videos/{id}/master.m3u8` and `/main.m3u8`. They advertise HLS and point at the existing direct-stream URL; no segments are generated and no transcoding is involved.
+- Emby API compatibility: login-page endpoints required by web clients are now served anonymously - `Branding/Configuration`, `Branding/Css(.css)`, `Localization/{Cultures,Countries,Options,ParentalRatings}`, `Startup/Configuration`, `System/Ext/ServerDomains`, `/emby/web/manifest.json`, and `Sessions/Capabilities`.
+- Emby API compatibility: additional endpoints - `/emby/Items/{id}` (bare item detail), `/emby/Library/MediaFolders`, `/emby/Items/Latest`, `/emby/Items/Resume`, `/emby/Users/{uid}/Items/Counts`, `/emby/Users/{uid}/Shows/{id}/{Seasons,Episodes}`, `/emby/DisplayPreferences/{id}`, `/emby/MediaSegments/{id}`, `/emby/Playback/BitrateTest`, subtitles without a media source id, and root liveness probes at `/emby`.
+- Authentication: additional token channels - `X-MediaBrowser-Token`, `X-MediaBrowser-Authorization`, `Authorization: MediaBrowser Token="..."`, and the `apiKey`, `ApiKey`, and `token` query parameters.
+- Metadata: `MediaItem` gained `Countries` and `Languages` (stored as JSON, exposed on `BaseItemDto`, writable through import and the admin item API).
+- Metadata: `/emby/Persons` now returns real people aggregated from visible items instead of an empty stub, and `/emby/Persons/{id}` resolves a person instead of looking up a media id.
+- Metadata: `?GenreIds=` and `?StudioIds=` filters now resolve virtual-item ids to names, so filters returned by `/emby/Genres` and `/emby/Studios` actually match.
 
 ### Changed
 
+- Request path normalization now derives the canonical form from the registered gin routes instead of a seven-entry hardcoded map. Requests without the `/emby` prefix (for example `/System/Info/Public`) and case variants (for example `/emby/system/info/public`) resolve to the same handlers. Paths outside the Emby namespace (`/api/*`, `/admin/`, `/healthz`, `/readyz`, `/metrics`, WebSocket aliases) are left untouched.
+- Image endpoints (`/emby/Items/{id}/Images/{type}[/{index}]`) accept either a valid token or a valid signature instead of requiring a token, so clients such as Infuse that replay cached image URLs without a token no longer lose posters.
+- Item image endpoints also answer HEAD requests.
+- Single-item admin create now writes people with deterministic ids and creates genre/studio/person virtual items, matching what bulk import already did. Without this, manually created items were missing from `/emby/Persons` and could not be found by `?PersonIds=`.
 - Docker builds use Go 1.26.3 and BuildKit target-platform arguments, rather than forcing amd64. The runtime uses UID/GID 10001 and includes only the binary and runtime packages, not the repository's configuration or local data.
 - Compose now uses a read-only root filesystem, dropped capabilities, no-new-privileges, a bounded temporary filesystem, rotated container logs, and a persistent named volume. It binds to loopback by default; set `FAKEMBY_BIND_ADDRESS` explicitly for LAN/reverse-proxy access.
 - Compose requires `FAKEMBY_ADMIN_API_KEY` and `FAKEMBY_PLAYBACK_SIGN_KEY` from the shell or a secret manager, instead of shipping blank/placeholder credentials. Removed unused scraper environment settings from the deployment example.
 - Container file logging is redirected to `/dev/null`; the application logger still writes to stderr. Database and image-cache writes stay under `/app/data`.
 - Probes issue GET requests to the existing `/emby/System/Info/Public` route. They check HTTP responsiveness, not database readiness; no new health endpoint is claimed by these deployment changes.
+
+### Fixed
+
+- `/emby/Branding/Configuration` no longer requires authentication; web clients fetch it from the login page before a token exists, so every request returned 401.
+- `/emby/Sessions/Capabilities` (the non-`Full` variant) is now available anonymously and accepts GET, POST, and HEAD; clients report device capabilities during the login handshake, often before holding a valid token.
+- `Authorization: MediaBrowser Token="..."` and the `X-MediaBrowser-*` headers were not parsed. The whole authorization string was compared as a token, which made valid credentials fail repeatedly with no obvious cause.
+- `/emby/Persons/{id}` previously looked up a media id, so opening an actor card failed; it now resolves the person. The route parameter was renamed to avoid access-control checks that treat it as a media id and returned 403.
+- Genre, studio, and person ids are now generated by a single shared helper (`database.VirtualItemID`). Previously three places computed `md5(prefix + ":" + name)` independently; any divergence silently broke `?PersonIds=` filtering without an error.
+- Client-facing array and map fields are initialized in one place (`types.NewBaseItemDto`). Adding `Countries` and `Languages` had left three construction sites emitting `null`, which official clients dereference without a guard.
+- Route registration is shared between the server and the test harness, and both use the same path normalization middleware. Previously each maintained its own list, so newly added endpoints returned 404 under test.
 
 ### Deployment and upgrade notes
 
