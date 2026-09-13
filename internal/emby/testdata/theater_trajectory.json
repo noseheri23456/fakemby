@@ -1,0 +1,435 @@
+{
+  "source": "server.log",
+  "client": "Emby Theater 3.0.20",
+  "generated_by": "scripts/dev/log_trajectory.py",
+  "total_requests": 125,
+  "requests": [
+    {
+      "method": "POST",
+      "route": "/emby/Users/AuthenticateByName",
+      "query": "",
+      "count": 2,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/System/Endpoint",
+      "query": "",
+      "count": 4,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "POST",
+      "route": "/emby/Items/{itemId}/PlaybackInfo",
+      "query": "UserId={userId}",
+      "count": 13,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/Users/{userId}/Views",
+      "query": "",
+      "count": 2,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/Users/{userId}/Items/{itemId}",
+      "query": "",
+      "count": 10,
+      "statuses": [
+        200,
+        404
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/Users/Me",
+      "query": "",
+      "count": 1,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/Users/{userId}",
+      "query": "",
+      "count": 24,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/System/Info",
+      "query": "",
+      "count": 2,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/System/Info/Public",
+      "query": "",
+      "count": 3,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/System/Configuration",
+      "query": "",
+      "count": 1,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/System/Configuration/public",
+      "query": "",
+      "count": 1,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/Branding/Configuration",
+      "query": "",
+      "count": 1,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/Sessions",
+      "query": "",
+      "count": 2,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/Plugins",
+      "query": "",
+      "count": 1,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/ScheduledTasks",
+      "query": "",
+      "count": 2,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/System/ActivityLog/Entries",
+      "query": "startIndex=0&limit=10",
+      "count": 4,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/LiveTv/Tuners",
+      "query": "",
+      "count": 1,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/LiveTv/Recordings",
+      "query": "UserId={userId}&IsInProgress=true",
+      "count": 2,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/System/Ping",
+      "query": "",
+      "count": 1,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/Artists",
+      "query": "SortBy=SortName&Filters=IsFavorite&Recursive=true&Limit=12&userId={userId}",
+      "count": 1,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/Persons",
+      "query": "",
+      "count": 1,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/Auth/Keys",
+      "query": "",
+      "count": 1,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/web/configurationpages",
+      "query": "PageType=PluginConfiguration&EnableInMainMenu=true",
+      "count": 2,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/Users/{userId}/Items/Latest",
+      "query": "",
+      "count": 1,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/Users/{userId}/Items/Resume",
+      "query": "",
+      "count": 1,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/Users/{userId}/Items",
+      "query": "",
+      "count": 2,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/DisplayPreferences/usersettings",
+      "query": "userId={userId}&client=emby",
+      "count": 1,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/Library/VirtualFolders",
+      "query": "",
+      "count": 1,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/Items/Counts",
+      "query": "",
+      "count": 1,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/Channels",
+      "query": "",
+      "count": 1,
+      "statuses": [
+        404
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/QuickConnect/Enabled",
+      "query": "",
+      "count": 1,
+      "statuses": [
+        404
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/Items/Filters",
+      "query": "",
+      "count": 1,
+      "statuses": [
+        404
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/embysocket",
+      "query": "",
+      "count": 2,
+      "statuses": [
+        200,
+        400
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/embysocket",
+      "query": "",
+      "count": 2,
+      "statuses": [
+        200,
+        400
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/embywebsocket",
+      "query": "deviceId=DESKTOP-D6INKLS",
+      "count": 1,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/Items/{itemId}/ThemeMedia",
+      "query": "UserId={userId}&InheritFromParent=true&EnableThemeSongs=true&EnableThemeVideos=true&X-Emby-Client=Emby%20Theater&X-Emby-Device-Name=DESKTOP-D6INKLS&X-Emby-Device-Id=DESKTOP-D6INKLS&X-Emby-Client-Version=3.0.20-3.0",
+      "count": 5,
+      "statuses": [
+        404
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/Users/{userId}/Items/{itemId}/SpecialFeatures",
+      "query": "X-Emby-Client=Emby%20Theater&X-Emby-Device-Name=DESKTOP-D6INKLS&X-Emby-Device-Id=DESKTOP-D6INKLS&X-Emby-Client-Version=3.0.20-3.0",
+      "count": 1,
+      "statuses": [
+        404
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/Items/{itemId}/Similar",
+      "query": "Limit=12&UserId={userId}&ImageTypeLimit=1&Fields=BasicSyncInfo%2CCanDelete%2CContainer%2CPrimaryImageAspectRatio%2CProductionYear&EnableTotalRecordCount=false&X-Emby-Client=Emby%20Theater&X-Emby-Device-Name=DESKTOP-D6INKLS&X-Emby-Device-Id=DESKTOP-D6INKLS&X-Emby-Client-Version=3.0.20-3.0",
+      "count": 2,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/Items/{itemId}/Images/Logo",
+      "query": "maxWidth=300&tag=9cd13cab&quality=90",
+      "count": 2,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/Items/{itemId}/Images/Primary",
+      "query": "maxHeight=600&maxWidth=400&tag=c91cb709&quality=90",
+      "count": 3,
+      "statuses": [
+        200,
+        404
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/Users/{userId}/Items/{itemId}/Intros",
+      "query": "X-Emby-Client=Emby%20Theater&X-Emby-Device-Name=DESKTOP-D6INKLS&X-Emby-Device-Id=DESKTOP-D6INKLS&X-Emby-Client-Version=3.0.20-3.0",
+      "count": 2,
+      "statuses": [
+        404
+      ]
+    },
+    {
+      "method": "POST",
+      "route": "/emby/Sessions/Playing",
+      "query": "X-Emby-Client=Emby%20Theater&X-Emby-Device-Name=DESKTOP-D6INKLS&X-Emby-Device-Id=DESKTOP-D6INKLS&X-Emby-Client-Version=3.0.20-3.0&reqformat=json",
+      "count": 2,
+      "statuses": [
+        204
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/emby/Videos/{itemId}/stream",
+      "query": "Static=true&mediaSourceId={sourceId}&uid={userId}",
+      "count": 6,
+      "statuses": [
+        404
+      ]
+    },
+    {
+      "method": "POST",
+      "route": "/emby/Sessions/Playing/Progress",
+      "query": "X-Emby-Client=Emby%20Theater&X-Emby-Device-Name=DESKTOP-D6INKLS&X-Emby-Device-Id=DESKTOP-D6INKLS&X-Emby-Client-Version=3.0.20-3.0&reqformat=json",
+      "count": 2,
+      "statuses": [
+        204
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/Items/{itemId}/Images/Backdrop/0",
+      "query": "tag=2c05ca82&maxWidth=1500&quality=70",
+      "count": 1,
+      "statuses": [
+        200
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/Items/{itemId}/Images",
+      "query": "X-Emby-Client=Emby%20Theater&X-Emby-Device-Name=DESKTOP-D6INKLS&X-Emby-Device-Id=DESKTOP-D6INKLS&X-Emby-Client-Version=3.0.20-3.0",
+      "count": 1,
+      "statuses": [
+        404
+      ]
+    },
+    {
+      "method": "GET",
+      "route": "/emby/Items/{itemId}/MetadataEditor",
+      "query": "X-Emby-Client=Emby%20Theater&X-Emby-Device-Name=DESKTOP-D6INKLS&X-Emby-Device-Id=DESKTOP-D6INKLS&X-Emby-Client-Version=3.0.20-3.0",
+      "count": 1,
+      "statuses": [
+        404
+      ]
+    }
+  ]
+}
