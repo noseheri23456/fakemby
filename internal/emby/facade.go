@@ -36,7 +36,6 @@ var RegisterItemRoutes = api.RegisterItemRoutes
 var RequestLogMiddleware = api.RequestLogMiddleware
 var ErrorHandlerMiddleware = api.ErrorHandlerMiddleware
 var CORSMiddleware = api.CORSMiddleware
-var CaseInsensitiveHandler = api.CaseInsensitiveHandler
 var ShutdownWebSockets = api.ShutdownWebSockets
 var RegisterWebSocketRoutes = api.RegisterWebSocketRoutes
 var OperationsMiddleware = api.OperationsMiddleware
@@ -111,3 +110,5 @@ var ErrBadRequest = api.ErrBadRequest
 var ErrInternal = api.ErrInternal
 var ErrInvalidToken = api.ErrInvalidToken
 var ErrInvalidCredentials = api.ErrInvalidCredentials
+
+var RegisterMSGOCompatRoutes = api.RegisterMSGOCompatRoutes

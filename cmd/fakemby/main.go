@@ -9,11 +9,11 @@ import (
 	"syscall"
 	"time"
 
-	adminapi "github.com/fakemby/fakemby/internal/api/admin"
 	"github.com/fakemby/fakemby/internal/api/emby"
 	"github.com/fakemby/fakemby/internal/config"
 	"github.com/fakemby/fakemby/internal/database"
 	"github.com/fakemby/fakemby/internal/logging"
+	routerpkg "github.com/fakemby/fakemby/internal/router"
 	"github.com/gin-gonic/gin"
 )
 
@@ -84,28 +84,12 @@ func main() {
 	router.Use(emby.RequestLogMiddleware())
 	router.Use(emby.ErrorHandlerMiddleware())
 
-	// 注册路由
-	emby.RegisterSystemRoutes(router, cfg)
-	emby.RegisterAuthRoutes(router, cfg)
-	emby.RegisterUserRoutes(router, cfg)
-	emby.RegisterUserDataRoutes(router, cfg) // Task 4.3 fix
-	emby.RegisterItemRoutes(router, cfg)
-	emby.RegisterShowRoutes(router, cfg)
-	adminapi.RegisterAdminItemRoutes(router)
-	adminapi.RegisterImportRoutes(router)
-	adminapi.RegisterAdminUserRoutes(router)
-	emby.RegisterPlaybackRoutes(router, cfg)
-	emby.RegisterSessionRoutes(router, cfg)
-	emby.RegisterImageRoutes(router, cfg)
-	emby.RegisterSearchRoutes(router, cfg)
-	emby.RegisterStatsRoutes(router, cfg)
-	emby.RegisterCompatRoutes(router, cfg)
+	// 注册路由（与测试服务共用同一份清单，见 internal/router.RegisterAll）
+	routerpkg.RegisterAll(router, cfg)
 
-	emby.RegisterWebSocketRoutes(router, cfg)
-	emby.RegisterOperations(router)
-
-	// 创建带大小写不敏感路由包装的 HTTP Handler
-	handler := emby.CaseInsensitiveHandler(router)
+	// 路径规范化必须在所有路由注册完之后构建：它从 gin 路由表反查，
+	// 用来补 /emby 前缀与大小写归一（替换原先只有 7 条映射的 CaseInsensitiveHandler）。
+	handler := emby.NewEmbyPathNormalizer(router, router)
 
 	// 创建服务器
 	server := &http.Server{

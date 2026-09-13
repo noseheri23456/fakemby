@@ -8,6 +8,7 @@ import (
 
 	"github.com/fakemby/fakemby/internal/config"
 	"github.com/fakemby/fakemby/internal/database"
+	"github.com/fakemby/fakemby/internal/infra/signer"
 	"github.com/fakemby/fakemby/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -16,9 +17,19 @@ func RegisterImageRoutes(router *gin.Engine, cfg *config.Config) {
 	imgSvc := service.NewImageService(database.Get(), cfg.Image.Mode, cfg.Image.CacheDir, cfg.Image.CacheMaxMB)
 	mediaSvc := service.NewMediaService(database.Get())
 
+	// 图片端点不做强制 token 校验，改为"token 或签名任一有效"（playbackAuth）。
+	//
+	// 原因：Infuse 会把图片 URL 缓存到下次启动再拉取，此时不会带 X-Emby-Token，
+	// 强制鉴权会让海报/背景图整片 404，而视频播放正常——用户只会以为"刮削没生效"，
+	// 极难联想到是鉴权问题（MediaStationGo / nowen 都对此公开）。
+	// 用 playbackAuth 而不是完全放开：匿名请求仍需持有效签名，不会把整个图库暴露出去。
+	imgAuth := playbackAuth(signer.New(cfg.Playback.SignKey, cfg.Playback.SignTTL), cfg.Auth.TokenExpiryDays)
+
 	// 媒体项图片
-	router.GET("/emby/Items/:itemId/Images/:imageType", AuthTokenMiddleware(cfg.TokenExpiryDays()), getItemImage(imgSvc, mediaSvc, cfg))
-	router.GET("/emby/Items/:itemId/Images/:imageType/:index", AuthTokenMiddleware(cfg.TokenExpiryDays()), getItemImageByIndex(imgSvc, mediaSvc, cfg))
+	router.GET("/emby/Items/:itemId/Images/:imageType", imgAuth, getItemImage(imgSvc, mediaSvc, cfg))
+	router.GET("/emby/Items/:itemId/Images/:imageType/:index", imgAuth, getItemImageByIndex(imgSvc, mediaSvc, cfg))
+	router.HEAD("/emby/Items/:itemId/Images/:imageType", imgAuth, getItemImage(imgSvc, mediaSvc, cfg))
+	router.HEAD("/emby/Items/:itemId/Images/:imageType/:index", imgAuth, getItemImageByIndex(imgSvc, mediaSvc, cfg))
 
 	// 用户头像
 	router.GET("/emby/Users/:userId/Images/:imageType", getUserImage(imgSvc, cfg))

@@ -21,9 +21,11 @@ func RegisterCompatRoutes(router *gin.Engine, cfg *config.Config) {
 	router.GET("/emby/System/Configuration/public", pubCfg)
 	router.GET("/emby/system/configuration/public", pubCfg)
 
+	// Branding/Configuration 必须公开：Web 客户端在**登录页**无条件拉取它，
+	// 那时还没有 token，挂鉴权会 100% 401（真实 Emby / MediaStationGo 都在公开组）。
 	branding := emptyJSONHandler()
-	router.GET("/emby/Branding/Configuration", auth, branding)
-	router.GET("/emby/branding/configuration", auth, branding)
+	router.GET("/emby/Branding/Configuration", branding)
+	router.GET("/emby/branding/configuration", branding)
 
 	plugins := emptyArrayHandler()
 	router.GET("/emby/Plugins", auth, plugins)

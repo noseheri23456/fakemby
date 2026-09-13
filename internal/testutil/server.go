@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	adminapi "github.com/fakemby/fakemby/internal/api/admin"
 	"github.com/fakemby/fakemby/internal/api/emby"
 	"github.com/fakemby/fakemby/internal/config"
 	"github.com/fakemby/fakemby/internal/database"
+	routerpkg "github.com/fakemby/fakemby/internal/router"
 	"github.com/gin-gonic/gin"
 )
 
@@ -82,33 +82,20 @@ func NewRouter(t *testing.T, cfg *config.Config) *gin.Engine {
 	router.Use(emby.RequestLogMiddleware())
 	router.Use(emby.ErrorHandlerMiddleware())
 
-	emby.RegisterSystemRoutes(router, cfg)
-	emby.RegisterAuthRoutes(router, cfg)
-	emby.RegisterUserRoutes(router, cfg)
-	emby.RegisterUserDataRoutes(router, cfg)
-	emby.RegisterItemRoutes(router, cfg)
-	emby.RegisterShowRoutes(router, cfg)
-	adminapi.RegisterAdminItemRoutes(router)
-	adminapi.RegisterImportRoutes(router)
-	adminapi.RegisterAdminUserRoutes(router)
-	emby.RegisterPlaybackRoutes(router, cfg)
-	emby.RegisterSessionRoutes(router, cfg)
-	emby.RegisterImageRoutes(router, cfg)
-	emby.RegisterSearchRoutes(router, cfg)
-	emby.RegisterStatsRoutes(router, cfg)
-	emby.RegisterCompatRoutes(router, cfg)
-	emby.RegisterWebSocketRoutes(router, cfg)
-	emby.RegisterOperations(router)
+	routerpkg.RegisterAll(router, cfg)
 
 	return router
 }
 
-// NewTestServer 起一个真实 HTTP 服务（含 main.go 的大小写不敏感包装），返回句柄。
+// NewTestServer 起一个真实 HTTP 服务（含 main.go 的路径规范化中间件），返回句柄。
 // 用真实服务而不是 httptest.NewRecorder，是为了让 302、CORS、Header 这些链路都被真正走一遍。
 func NewTestServer(t *testing.T, cfg *config.Config) *httptest.Server {
 	t.Helper()
 
-	ts := httptest.NewServer(emby.CaseInsensitiveHandler(NewRouter(t, cfg)))
+	// 必须与 main.go 用同一个路径规范化中间件，否则测试覆盖不到
+	// "无 /emby 前缀" 与 "大小写变体" 这两类真实客户端行为。
+	r := NewRouter(t, cfg)
+	ts := httptest.NewServer(emby.NewEmbyPathNormalizer(r, r))
 	t.Cleanup(ts.Close)
 	return ts
 }
