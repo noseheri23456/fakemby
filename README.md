@@ -2,7 +2,7 @@
 
 轻量级 Emby 兼容媒体服务器，用 Go 编写。
 
-不扫库、不刮削：元数据与播放链接由上游导入方通过 API 直写，播放以 302 重定向方式串流外部视频源（115、网盘、CDN 等），服务器本身零带宽。适合个人或小团队的媒体共享场景。
+不扫库、不刮削：元数据与播放链接由上游导入方通过 API 直写，播放用 302 重定向串流外部视频源（115、网盘、CDN 等），服务器本身零带宽。适合个人或小团队的媒体共享场景。
 
 ## 特性
 
@@ -44,7 +44,7 @@ CGO_ENABLED=0 go build -o fakemby ./cmd/fakemby
 ./fakemby
 ```
 
-启动后访问 `http://localhost:8096`。默认账户 `admin` / `admin`，**首次登录会被强制要求改密**。
+启动后访问 `http://localhost:8096`。默认账户 `admin` / `admin`，**首次登录会强制改密**。
 
 > 生产部署务必设置：① `admin.api_key` / `FAKEMBY_ADMIN_API_KEY`（留空或仍为 `change-me` 时 `/api/admin/*` 全部拒绝）；② `playback.sign_key` / `FAKEMBY_PLAYBACK_SIGN_KEY`（留空时启动生成临时随机密钥，重启后旧直链失效）；③ 修改默认 `admin` 口令。
 
@@ -80,7 +80,7 @@ fakemby import snapshot.json      # 在新实例导入（版本不符直接拒�
 
 ## 配置
 
-配置文件 `config.yaml` 可选；缺失时回落内置默认值并告警。所有项可用 `FAKEMBY_` 前缀的环境变量覆盖（层级用 `_` 分隔）。完整说明见 [配置指南](docs/CONFIGURATION.md)。
+配置文件 `config.yaml` 可选；缺失时用内置默认值并告警。所有项可用 `FAKEMBY_` 前缀的环境变量覆盖（层级用 `_` 分隔）。完整说明见 [配置指南](docs/CONFIGURATION.md)。
 
 | 环境变量 | 说明 |
 |---------|------|

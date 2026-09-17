@@ -10,7 +10,7 @@ git clone https://github.com/fakemby/fakemby.git && cd fakemby
 go mod tidy
 
 # 运行（调试模式）
-LOG_LEVEL=debug go run ./cmd/fakemby
+FAKEMBY_LOG_LEVEL=debug go run ./cmd/fakemby
 ```
 
 ## 构建
@@ -91,10 +91,10 @@ sqlite3 fakemby.db
    - 字段名严格匹配官方规范（区分大小写）
    - 可选字段使用指针类型
 
-3. **注册路由** → `cmd/fakemby/main.go`
+3. **注册路由** → `internal/router/router.go` 的 `RegisterAll`（唯一的路由注册点）
    - `/emby/` 前缀
 
-4. **实现 Handler** → `internal/emby/` 下对应文件
+4. **实现 Handler** → `internal/api/emby/` 下对应文件
    - 解析标准查询参数
    - 返回正确的 HTTP 状态码
    - 使用 `EmbyError` 格式返回错误
@@ -121,8 +121,8 @@ sqlite3 fakemby.db
 
 ## 添加新的管理 API
 
-1. 实现 Handler → `internal/emby/` 下的管理相关文件
-2. 注册路由 → `cmd/fakemby/main.go`，`/api/admin/` 前缀
+1. 实现 Handler → `internal/api/admin/` 下对应文件
+2. 注册路由 → `internal/router/router.go` 的 `RegisterAll`，`/api/admin/` 前缀
 3. 中间件校验 `X-Api-Key` Header
 4. 多表操作使用 `db.Transaction()`
 5. 标准响应格式：`{"result": ...}` 或 `{"errors": [...]}`

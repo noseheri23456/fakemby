@@ -4,7 +4,7 @@
 
 | 层级 | 选型 | 说明 |
 |------|------|------|
-| 语言 | Go 1.22+ | 单二进制，高并发 |
+| 语言 | Go 1.26.3（见 `go.mod`） | 单二进制，高并发 |
 | HTTP 框架 | gin-gonic/gin | 成熟高性能路由 |
 | 数据库 | SQLite (`glebarez/sqlite`) | 纯 Go 驱动，无 CGO |
 | ORM | GORM (`gorm.io/gorm`) | 自动迁移、事务支持 |
@@ -19,41 +19,33 @@
 ```
 fakemby/
 ├── cmd/fakemby/
-│   └── main.go                    # 入口：加载配置 → 初始化 DB → 注册路由 → 启动 HTTP
+│   ├── main.go                     # 入口：加载配置 → 初始化 DB → 注册路由 → 启动 HTTP
+│   └── commands.go                 # fakemby export / import 快照子命令
 ├── internal/
-│   ├── config/
-│   │   └── config.go              # Viper 配置加载，导出 Config 结构体
-│   ├── database/
-│   │   ├── database.go            # SQLite 初始化 (WAL 模式)、AutoMigrate、索引
-│   │   └── models.go              # GORM 模型定义
-│   ├── emby/                      # Emby API 兼容层
-│   │   ├── auth.go                # 认证：登录/登出/Token 中间件
-│   │   ├── users.go               # GET /emby/Users/*
-│   │   ├── items.go               # GET /emby/Users/{id}/Items（列表/详情/最新/Folders）
-│   │   ├── shows.go               # GET /emby/Shows/* (季/集)
-│   │   ├── images.go              # GET /emby/Items/{id}/Images/*
-│   │   ├── playback.go            # PlaybackInfo + 302 流重定向
-│   │   ├── sessions.go            # Playing/Progress/Stopped（含进度缓冲）
-│   │   ├── userdata.go            # PlayedItems/FavoriteItems/Resume
-│   │   ├── search.go              # Search/Hints + Similar
-│   │   ├── import.go              # 批量导入（单事务）
-│   │   ├── admin_users.go         # 管理员用户操作
-│   │   ├── stats.go               # Items/Counts 统计
-│   │   ├── system.go              # System/Info
-│   │   ├── middleware.go          # 请求日志
-│   │   ├── errors.go              # Emby 标准错误格式
-│   │   └── shortid.go             # ID 生成辅助
-│   ├── service/                   # 业务逻辑层
-│   │   ├── media.go               # DB 查询 + Model→DTO 转换
-│   │   ├── image.go               # 图片重定向/代理缓存逻辑
-│   │   ├── auth.go                # 密码哈希、Token 操作
-│   │   ├── playback.go            # 播放相关业务逻辑
-│   │   └── search.go              # 搜索业务逻辑
-│   └── types/
-│       └── dto.go                 # BaseItemDto 等响应 DTO
+│   ├── router/router.go            # 路由注册唯一入口 RegisterAll（生产与测试共用）
+│   ├── api/
+│   │   ├── emby/                   # Emby 协议适配层（一个文件一个资源域）
+│   │   └── admin/                  # 管理 REST（/api/admin/*，统一挂 adminAuth）
+│   ├── service/                    # 业务编排（media / image / auth / playback / search）
+│   ├── repo/                       # 数据访问（GORM 实现，接口化便于测试打桩）
+│   ├── access/                     # 访问策略：按库/分级的作用域 SQL（policy / scope）
+│   ├── infra/
+│   │   ├── signer/                 # HMAC 直链签名与校验
+│   │   ├── ws/                     # WebSocket Hub（帧解析 + 心跳 + 广播）
+│   │   ├── ratelimit/              # 登录失败限流
+│   │   └── source/                 # 外部源解析（STRM 等）
+│   ├── admin/                      # 内置管理页面外壳（embed web/*）
+│   ├── config/config.go            # viper 配置（含 FAKEMBY_ 环境变量绑定）
+│   ├── database/                   # SQLite 初始化（WAL）、AutoMigrate、模型
+│   ├── logging/logging.go          # slog 初始化
+│   ├── transfer/snapshot.go        # 快照导出 / 导入
+│   ├── types/                      # BaseItemDto 等响应 DTO
+│   ├── testutil/                   # 测试基建（内存库 + 测试服务器）
+│   └── emby/                       # 只剩转发门面 facade.go 与契约 / 回归测试
 ├── scripts/
-│   ├── dev/                       # 开发辅助：quickstart.ps1 等
-│   └── test/                      # 测试脚本：导入数据、集成测试等
+│   ├── dev/                        # 开发辅助：probe_theater.py、test-race.ps1 等
+│   └── test/                       # 测试脚本：导入数据、集成测试等
+├── deploy/helm/fakemby/            # 极简 Helm chart
 ├── config.yaml
 ├── Dockerfile
 ├── docker-compose.yml
@@ -99,7 +91,7 @@ Viper 加载 `config.yaml`，支持环境变量覆盖（如 `FAKEMBY_SERVER_PORT
 
 ### 5. 服务层
 
-Handler → Service → DB 的分层架构：
+Handler → Service → repo → DB 的分层架构：
 - `media.go`：GORM 查询 + Model→DTO 转换，JSON 字段（genres/studios/people）解析
 - `image.go`：图片重定向 vs 代理缓存，MaxWidth/MaxHeight 缩放，图片继承
 - `auth.go`：bcrypt 哈希、Token CRUD、后台过期清理

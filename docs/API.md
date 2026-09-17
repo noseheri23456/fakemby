@@ -30,7 +30,7 @@ POST /emby/Users/AuthenticateByName
 
 ### Token 传递
 
-后续请求使用以下任一方式传递 Token：
+后续请求用以下任一方式传递 Token：
 
 | 方式 | 示例 |
 |------|------|

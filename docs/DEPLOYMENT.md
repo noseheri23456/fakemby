@@ -25,7 +25,7 @@ docker-compose down
 ### 手动 Docker 构建
 
 ```bash
-# 构建镜像（多阶段：Go 1.22 编译 + Alpine 3.19 运行）
+# 构建镜像（多阶段：Go 1.26.3 编译 + Alpine 3.22 运行，见 Dockerfile 的 ARG）
 docker build -t fakemby:latest .
 
 # 运行容器
@@ -150,18 +150,18 @@ emby.example.com {
 ### SQLite 备份
 
 ```bash
-# 直接复制（确保服务器运行中也安全，WAL 模式）
+# 先停服务再复制（运行中直接 cp 可能拿到尚未合并 WAL 的损坏副本）
 cp /opt/fakemby/fakemby.db /backup/fakemby-$(date +%Y%m%d).db
 
-# 或使用 sqlite3 .backup 命令
+# 或不停服务，用 sqlite3 .backup（会正确处理 WAL）
 sqlite3 /opt/fakemby/fakemby.db ".backup '/backup/fakemby.db'"
 ```
 
 ### 定时备份（cron）
 
 ```bash
-# 每天凌晨 3 点备份
-0 3 * * * cp /opt/fakemby/fakemby.db /backup/fakemby-$(date +\%Y\%m\%d).db
+# 每天凌晨 3 点备份（用 .backup，不中断服务）
+0 3 * * * sqlite3 /opt/fakemby/fakemby.db ".backup '/backup/fakemby-$(date +\%Y\%m\%d).db'"
 ```
 
 ---
@@ -172,7 +172,7 @@ sqlite3 /opt/fakemby/fakemby.db ".backup '/backup/fakemby.db'"
 |------|------|------|
 | `image.mode` | `redirect` | 零带宽，服务器只做 302 跳转 |
 | `database.wal_mode` | `true` | 支持并发读取 |
-| 进度缓冲 | 默认 30s | 减少 90% 的 DB 写入锁竞争 |
+| 进度缓冲 | 默认 30s | 批量落库，减少 DB 写入锁竞争 |
 | `SetMaxOpenConns` | `1` | SQLite 单连接避免 "database is locked" |
 
 ---
@@ -187,7 +187,7 @@ lsof -i :8096                          # Linux/macOS
 netstat -ano | findstr :8096           # Windows
 
 # 启用调试日志
-LOG_LEVEL=debug ./fakemby
+FAKEMBY_LOG_LEVEL=debug ./fakemby
 ```
 
 常见原因：
@@ -206,7 +206,7 @@ LOG_LEVEL=debug ./fakemby
 
 - **redirect 模式**：确认外部图片 URL 可访问
 - **proxy_cache 模式**：检查 `cache_dir` 目录权限
-- 启用 `LOG_LEVEL=debug` 查看图片请求日志
+- 启用 `FAKEMBY_LOG_LEVEL=debug` 查看图片请求日志
 
 ### 播放无法开始
 
