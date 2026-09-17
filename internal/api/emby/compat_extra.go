@@ -32,12 +32,19 @@ func registerExtraCompat(r *gin.Engine, cfg *config.Config) {
 	r.GET("/emby/Playlists", auth, emptyItemsHandler())
 	r.GET("/emby/Collections", auth, emptyItemsHandler())
 
+	// 推荐位：官方客户端在电影/剧集首页会拉 Recommendations，404 会让该行整块消失。
+	// 本项目不做推荐计算，返回空结果集即可（结构与 Items 查询一致，客户端按 Items 读）。
+	r.GET("/emby/Movies/Recommendations", auth, emptyItemsHandler())
+	r.GET("/emby/Shows/Recommendations", auth, emptyItemsHandler())
+	r.GET("/emby/Items/:itemId/Recommendations", auth, emptyItemsHandler())
+
 	// M3-1（log 驱动轨迹发现）：以下路径变体在真实 Emby Theater 会话里出现过，
 	// 但此前只注册了「全局维度」的写法 → 客户端拿到 404，炸断详情页 Promise 链。
 	// 带 :userId 的一律挂归属校验（M0-5 约定）。
 	owner := RequireUserMatch("userId")
 	r.GET("/emby/Users/:userId/Items/:itemId/SpecialFeatures", auth, owner, emptyArrayHandler())
 	r.GET("/emby/Users/:userId/Items/:itemId/Intros", auth, owner, emptyItemsHandler())
+	r.GET("/emby/Users/:userId/Items/:itemId/Recommendations", auth, owner, emptyItemsHandler())
 	r.GET("/emby/Items/:itemId/ThemeMedia", auth, themeMedia())
 	r.GET("/emby/Items/:itemId/Images", auth, itemImages())
 }
@@ -370,6 +377,32 @@ func personDetail() gin.HandlerFunc {
 		c.JSON(200, svc.ItemToDTO(item, c.GetString("user_id"), nil))
 	}
 }
+
+// virtualItemDTO 返回虚拟条目（Genre / Studio / Person）的 DTO。
+//
+// 这类条目没有 library_id，会被访问作用域从所有查询里过滤掉。但客户端点演员卡片、
+// 分类磁贴时请求的是 /emby/Users/{uid}/Items/{虚拟条目ID}，一旦 404，详情页的
+// Promise.all 就整体 reject，表现为 "Content no longer available"。
+// 它们只含名字和图片，不含媒体内容与播放源，因此直接查全库不构成越权。
+func virtualItemDTO(id string) (*types.BaseItemDto, bool) {
+	var item database.MediaItem
+	if database.Get().Where("id = ? AND type IN ?", id, VirtualItemTypes).First(&item).Error != nil {
+		return nil, false
+	}
+	dto := types.NewBaseItemDto()
+	dto.ID = item.ID
+	dto.Name = item.Name
+	dto.Type = item.Type
+	var img database.Image
+	if database.Get().Where("item_id = ? AND type = ?", item.ID, "Primary").First(&img).Error == nil && img.Tag != "" {
+		dto.ImageTags = map[string]string{"Primary": img.Tag}
+	}
+	return &dto, true
+}
+
+// VirtualItemTypes 是 media_items 里虚拟条目 type 的存储形态，供 SQL IN 使用。
+// 判重/比较统一走 access.IsVirtualType（大小写不敏感），这里只负责拼查询条件。
+var VirtualItemTypes = []string{"Genre", "Studio", "Person"}
 
 // resolveVirtualNames 把分类/人物的虚拟条目 ID 解析成名字。
 //

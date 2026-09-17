@@ -25,6 +25,16 @@ func RegisterShowRoutes(router *gin.Engine, cfg *config.Config) {
 	// 获取季的集列表
 	router.GET("/emby/Shows/:seriesId/Episodes", authMiddleware, episodesHandler)
 	router.GET("/emby/shows/:seriesId/episodes", authMiddleware, episodesHandler) // 小写版本
+
+	// 官方客户端进库视图会直接打 /emby/Shows、/emby/Movies（不带 IncludeItemTypes），
+	// 这两个路径原先没注册，客户端拿到 404 就表现为"库是空的"。
+	// 补上并默认按类型过滤，其余查询参数照旧透传给 getItems。
+	showsList := itemsHandler(mediaSvc, "Series")
+	moviesList := itemsHandler(mediaSvc, "Movie")
+	router.GET("/emby/Shows", authMiddleware, showsList)
+	router.GET("/emby/shows", authMiddleware, showsList)
+	router.GET("/emby/Movies", authMiddleware, moviesList)
+	router.GET("/emby/movies", authMiddleware, moviesList)
 }
 
 func getSeasons(mediaSvc *service.MediaService) gin.HandlerFunc {

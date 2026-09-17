@@ -135,6 +135,13 @@ func getSimilarItems() gin.HandlerFunc {
 		// 获取原项目验证存在
 		_, err := mediaSvc.GetItemByID(itemID)
 		if err != nil {
+			// Genre / Studio / Person 这类虚拟条目不属于任何库，会被访问作用域过滤掉；
+			// 但客户端在它们的详情页同样会拉 Similar，404 会炸断详情页的 Promise 链
+			// （表现为 "Content no longer available"）。相似项对它们没有意义，返回空集。
+			if _, ok := virtualItemDTO(itemID); ok {
+				c.JSON(http.StatusOK, gin.H{"Items": []types.BaseItemDto{}, "TotalRecordCount": 0})
+				return
+			}
 			c.JSON(http.StatusNotFound, ErrNotFound)
 			return
 		}

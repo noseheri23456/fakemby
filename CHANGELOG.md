@@ -1,61 +1,72 @@
-# Changelog
+# 更新日志
 
 ## [Unreleased]
 
-### Added
+### 新增
 
-- M4-3: Linux amd64/arm64 release archives with SHA-256 checksums using GoReleaser v2, plus a versioned Helm chart attached to GitHub Releases.
-- M4-3: A tag-triggered release workflow builds and publishes multi-platform images to `ghcr.io/<repository-owner>/<repository-name>`. It validates Go tests, GoReleaser configuration, Compose, and Helm before publication. Pull requests affecting release assets and manual workflow runs validate only.
-- M4-4: A minimal Helm chart with a Service, retained SQLite PVC (or existing claim), existing Secret references, optional configuration ConfigMap, startup/readiness/liveness probes, and restricted pod/container security contexts.
-- Emby API compatibility: `GET/HEAD /emby/Videos/{id}/original` (with optional container suffix) and HEAD support for `/emby/Videos/{id}/stream`, so clients that prefer `original` (most 2025-era players) can start playback instead of receiving 404/405.
-- Emby API compatibility: pseudo-HLS playlists at `/emby/Videos/{id}/master.m3u8` and `/main.m3u8`. They advertise HLS and point at the existing direct-stream URL; no segments are generated and no transcoding is involved.
-- Emby API compatibility: login-page endpoints required by web clients are now served anonymously - `Branding/Configuration`, `Branding/Css(.css)`, `Localization/{Cultures,Countries,Options,ParentalRatings}`, `Startup/Configuration`, `System/Ext/ServerDomains`, `/emby/web/manifest.json`, and `Sessions/Capabilities`.
-- Emby API compatibility: additional endpoints - `/emby/Items/{id}` (bare item detail), `/emby/Library/MediaFolders`, `/emby/Items/Latest`, `/emby/Items/Resume`, `/emby/Users/{uid}/Items/Counts`, `/emby/Users/{uid}/Shows/{id}/{Seasons,Episodes}`, `/emby/DisplayPreferences/{id}`, `/emby/MediaSegments/{id}`, `/emby/Playback/BitrateTest`, subtitles without a media source id, and root liveness probes at `/emby`.
-- Authentication: additional token channels - `X-MediaBrowser-Token`, `X-MediaBrowser-Authorization`, `Authorization: MediaBrowser Token="..."`, and the `apiKey`, `ApiKey`, and `token` query parameters.
-- Metadata: `MediaItem` gained `Countries` and `Languages` (stored as JSON, exposed on `BaseItemDto`, writable through import and the admin item API).
-- Metadata: `/emby/Persons` now returns real people aggregated from visible items instead of an empty stub, and `/emby/Persons/{id}` resolves a person instead of looking up a media id.
-- Metadata: `?GenreIds=` and `?StudioIds=` filters now resolve virtual-item ids to names, so filters returned by `/emby/Genres` and `/emby/Studios` actually match.
+- M4-3：用 GoReleaser v2 产出 Linux amd64/arm64 发布归档（含 SHA-256 校验和），并把带版本号的 Helm chart 作为 GitHub Release 附件一并发布。
+- M4-3：由 tag 触发的发布工作流会构建并向 `ghcr.io/<repository-owner>/<repository-name>` 推送多平台镜像。发布前校验 Go 测试、GoReleaser 配置、Compose 与 Helm；影响发布资产的 Pull Request 与手动运行只做校验。
+- M4-4：极简 Helm chart —— Service、保留的 SQLite PVC（或既有 claim）、引用既有 Secret、可选的配置 ConfigMap、启动/就绪/存活探针，以及受限的 pod/容器安全上下文。
+- Emby API 兼容：新增 `GET/HEAD /emby/Videos/{id}/original`（可带容器后缀）与 `/emby/Videos/{id}/stream` 的 HEAD 支持，偏好 `original` 的客户端（多数 2025 年一代的播放器）能直接起播，不再收到 404/405。
+- Emby API 兼容：`/emby/Videos/{id}/master.m3u8` 与 `/main.m3u8` 的伪 HLS 播放列表。它们声明支持 HLS 并指向既有的直链地址；不生成分片，不涉及转码。
+- Emby API 兼容：Web 客户端登录页所需的端点改为匿名可访问 —— `Branding/Configuration`、`Branding/Css(.css)`、`Localization/{Cultures,Countries,Options,ParentalRatings}`、`Startup/Configuration`、`System/Ext/ServerDomains`、`/emby/web/manifest.json`、`Sessions/Capabilities`。
+- Emby API 兼容：新增端点 —— `/emby/Items/{id}`（裸条目详情）、`/emby/Library/MediaFolders`、`/emby/Items/Latest`、`/emby/Items/Resume`、`/emby/Users/{uid}/Items/Counts`、`/emby/Users/{uid}/Shows/{id}/{Seasons,Episodes}`、`/emby/DisplayPreferences/{id}`、`/emby/MediaSegments/{id}`、`/emby/Playback/BitrateTest`、不带媒体源 ID 的字幕，以及 `/emby` 根存活探测。
+- 认证：新增 token 传递通道 —— `X-MediaBrowser-Token`、`X-MediaBrowser-Authorization`、`Authorization: MediaBrowser Token="..."`，以及 `apiKey`、`ApiKey`、`token` 三个查询参数。
+- 元数据：`MediaItem` 新增 `Countries` 与 `Languages`（以 JSON 存储，出现在 `BaseItemDto` 上，可通过导入与管理端条目 API 写入）。
+- 元数据：`/emby/Persons` 现在从可见条目聚合真实人物，不再返回空桩；`/emby/Persons/{id}` 解析人物，而不是按媒体 ID 查找。
+- 元数据：`?GenreIds=` 与 `?StudioIds=` 过滤器现在会把虚拟条目 ID 还原成名字，因此 `/emby/Genres` 与 `/emby/Studios` 返回的过滤值能真正匹配上。
+- 工具：`scripts/tools/xiaoya_import.py` —— 把小雅（emby.xiaoya.pro）「每日更新」目录里的 NFO 元数据、自带图片与 strm 直链翻译成 `/api/admin/import` 请求，支持 scan / build / push / run 四种子命令、目录抓取缓存、库类型自动设置、按上限分批、直链前缀重写与导入前直链体检。用法见 `docs/XIAOYA_IMPORT.md`。
+- Emby API 兼容：新增 `GET /emby/Shows` 与 `GET /emby/Movies`（含小写变体），默认分别按 Series / Movie 过滤。官方客户端进入库视图时打的就是这两个路径，此前返回 404。
+- Emby API 兼容：新增推荐位端点 `Movies/Recommendations`、`Shows/Recommendations`、`Items/{id}/Recommendations`（含带用户 ID 的变体），返回空结果集。客户端首页请求它们时收到 404 会让整行推荐消失。
+- 配置：新增 `image.require_auth`（默认 `false`，可用 `FAKEMBY_IMAGE_REQUIRE_AUTH` 覆盖）。为 `true` 时图片端点强制校验凭据；默认关闭，与 Emby 官方一致。
 
-### Changed
+### 变更
 
-- Request path normalization now derives the canonical form from the registered gin routes instead of a seven-entry hardcoded map. Requests without the `/emby` prefix (for example `/System/Info/Public`) and case variants (for example `/emby/system/info/public`) resolve to the same handlers. Paths outside the Emby namespace (`/api/*`, `/admin/`, `/healthz`, `/readyz`, `/metrics`, WebSocket aliases) are left untouched.
-- Image endpoints (`/emby/Items/{id}/Images/{type}[/{index}]`) accept either a valid token or a valid signature instead of requiring a token, so clients such as Infuse that replay cached image URLs without a token no longer lose posters.
-- Item image endpoints also answer HEAD requests.
-- Single-item admin create now writes people with deterministic ids and creates genre/studio/person virtual items, matching what bulk import already did. Without this, manually created items were missing from `/emby/Persons` and could not be found by `?PersonIds=`.
-- Docker builds use Go 1.26.3 and BuildKit target-platform arguments, rather than forcing amd64. The runtime uses UID/GID 10001 and includes only the binary and runtime packages, not the repository's configuration or local data.
-- Compose now uses a read-only root filesystem, dropped capabilities, no-new-privileges, a bounded temporary filesystem, rotated container logs, and a persistent named volume. It binds to loopback by default; set `FAKEMBY_BIND_ADDRESS` explicitly for LAN/reverse-proxy access.
-- Compose requires `FAKEMBY_ADMIN_API_KEY` and `FAKEMBY_PLAYBACK_SIGN_KEY` from the shell or a secret manager, instead of shipping blank/placeholder credentials. Removed unused scraper environment settings from the deployment example.
-- Container file logging is redirected to `/dev/null`; the application logger still writes to stderr. Database and image-cache writes stay under `/app/data`.
-- Probes issue GET requests to the existing `/emby/System/Info/Public` route. They check HTTP responsiveness, not database readiness; no new health endpoint is claimed by these deployment changes.
+- 请求路径归一化改为从已注册的 gin 路由推导规范形式，不再依赖七条硬编码映射。不带 `/emby` 前缀的请求（例如 `/System/Info/Public`）与大小写变体（例如 `/emby/system/info/public`）会解析到同一批 handler。Emby 命名空间之外的路径（`/api/*`、`/admin/`、`/healthz`、`/readyz`、`/metrics`、WebSocket 别名）不受影响。
+- 图片端点（`/emby/Items/{id}/Images/{type}[/{index}]`）接受有效 token **或**有效签名，不再强制要求 token；像 Infuse 这样重放缓存图片 URL 而不带 token 的客户端不会再丢海报。
+- 条目图片端点同时应答 HEAD 请求。
+- 管理端创建单个条目时，现在会用确定性 ID 写入人物，并创建 genre/studio/person 虚拟条目，与批量导入的行为一致。此前手工创建的条目不会出现在 `/emby/Persons`，也无法被 `?PersonIds=` 找到。
+- Docker 构建改用 Go 1.26.3 与 BuildKit 目标平台参数，不再强制 amd64。运行时使用 UID/GID 10001，镜像只包含二进制与运行时依赖，不含仓库的配置或本地数据。
+- Compose 改为只读根文件系统、丢弃 capabilities、no-new-privileges、有界 tmpfs、轮转容器日志、持久命名卷，默认绑定回环地址；需要局域网/反代访问时显式设置 `FAKEMBY_BIND_ADDRESS`。
+- Compose 要求从 shell 或密钥管理器提供 `FAKEMBY_ADMIN_API_KEY` 与 `FAKEMBY_PLAYBACK_SIGN_KEY`，不再内置空值或占位凭据。同时删除部署示例中未使用的刮削器环境变量。
+- 容器内文件日志重定向到 `/dev/null`；应用日志仍写 stderr。数据库与图片缓存仍写在 `/app/data` 下。
+- 探针改为对既有的 `/emby/System/Info/Public` 路由发 GET。它们检查的是 HTTP 是否响应，不是数据库是否就绪；这些部署变更没有新增健康检查端点。
 
-### Fixed
+### 修复
 
-- Admin user deletion no longer reports success unconditionally. `db.Transaction(...)` already returns an `error`; the extra `.Error` access took that error's `Error` method value, which is never `nil`, so every failure was swallowed and the endpoint always answered `204`.
-- `/emby/Branding/Configuration` no longer requires authentication; web clients fetch it from the login page before a token exists, so every request returned 401.
-- `/emby/Sessions/Capabilities` (the non-`Full` variant) is now available anonymously and accepts GET, POST, and HEAD; clients report device capabilities during the login handshake, often before holding a valid token.
-- `Authorization: MediaBrowser Token="..."` and the `X-MediaBrowser-*` headers were not parsed. The whole authorization string was compared as a token, which made valid credentials fail repeatedly with no obvious cause.
-- `/emby/Persons/{id}` previously looked up a media id, so opening an actor card failed; it now resolves the person. The route parameter was renamed to avoid access-control checks that treat it as a media id and returned 403.
-- Genre, studio, and person ids are now generated by a single shared helper (`database.VirtualItemID`). Previously three places computed `md5(prefix + ":" + name)` independently; any divergence silently broke `?PersonIds=` filtering without an error.
-- Client-facing array and map fields are initialized in one place (`types.NewBaseItemDto`). Adding `Countries` and `Languages` had left three construction sites emitting `null`, which official clients dereference without a guard.
-- Route registration is shared between the server and the test harness, and both use the same path normalization middleware. Previously each maintained its own list, so newly added endpoints returned 404 under test.
+- 管理端删除用户不再无条件返回成功。`db.Transaction(...)` 返回的本身就是 `error`，多取一次 `.Error` 拿到的是该错误的 `Error` 方法值（永不为 `nil`），失败被完全吞掉，接口总是返回 `204`。
+- `/emby/Branding/Configuration` 不再要求认证；Web 客户端在还没有 token 时就要从登录页取它，此前每次请求都返回 401。
+- `/emby/Sessions/Capabilities`（非 `Full` 变体）现在匿名可访问，并接受 GET、POST、HEAD；客户端常在拿到有效 token 之前上报设备能力。
+- `Authorization: MediaBrowser Token="..."` 与 `X-MediaBrowser-*` 头此前不被解析，整个认证串被当作 token 比对，导致有效凭据反复失败且看不出原因。
+- `/emby/Persons/{id}` 此前按媒体 ID 查库，打开演员卡片必然失败；现在解析人物。路由参数同时改名，避免访问控制把它当成媒体 ID 而返回 403。
+- Genre、studio、person 的 ID 现在由同一个共享函数生成（`database.VirtualItemID`）。此前三处各自计算 `md5(prefix + ":" + name)`，任何不一致都会让 `?PersonIds=` 过滤静默失效且不报错。
+- 面向客户端的数组与 map 字段统一在一处初始化（`types.NewBaseItemDto`）。新增 `Countries` 与 `Languages` 时曾让三处构造点输出 `null`，而官方客户端不做空值判断。
+- 路由注册改为服务端与测试脚手架共用一份，两者使用同一套路径归一化中间件。此前各自维护一份清单，新增端点在测试里返回 404。
+- 季的 `IndexNumber` 现在填季号（此前只填集号，季恒为 `null`），客户端据此排序与显示季序号；季的 `ParentIndexNumber` 不再误填。
+- 图片端点默认允许匿名读取。官方客户端（Emby Theater）是用 `<img src>` 拉图的：`apiclient.getImageUrl` 不拼 `api_key`，浏览器也无法给图片请求附加请求头，强制鉴权会让海报整片 401。带凭据的请求仍然完整校验，"带错凭据"不会比"不带"更宽松；需要收紧时设 `image.require_auth = true`。
+- 条目图片现在按回退链找图：本条目指定类型 → 同条目 `Thumb`/`Backdrop` → 沿父链（Episode→Season→Series）逐级找 `Primary`/`Thumb`/`Backdrop`。官方客户端只请求 `Primary`，而集和季常常只有 `Thumb` 或没有图，此前这些卡片一律 404 显示空白。
+- 访问控制不再拒绝 Genre / Studio / Person 虚拟条目。它们没有 `library_id`，被"必须属于某个库"的谓词判为越权：客户端点演员头像时请求 `/emby/Users/{uid}/Items/{人物ID}` 得到 403，详情页的 `Promise.all` 整体 reject，显示 "Content no longer available"。按 ID 直接访问时放行，列表查询仍受作用域约束；同时新增 `virtualItemDTO`，让条目详情与 `Similar` 都能正确应答这类 ID。
+- 媒体库的 `Subviews` 按类型生成（`tvshows` 含 `series` / `episodes` / `studios`，`movies` 含 `movies` / `videos` 等），不再一律返回 `[库类型, tags, genres, folders]`。Emby Theater 的 `tv/tv.js` 按 `subviews.includes("series")` 决定"剧集"入口是否显示，按 `includes("episodes")` 决定"单集"视图是否显示——清单里没有这两项时，剧集库的分类栏会少掉整个"剧集"分类，也进不了单集视图（连带只在单集视图里出现的"节目名称"排序也用不上）。
+- `PlaybackInfo` 对没有播放源的条目（例如整部剧）返回空 `MediaSources`，不再返回 404。官方客户端进详情页时会顺带拉一次用于背景预览，404 会打断请求链。
+- 访问被拒时记录审计日志（用户、条目 ID、路径、来源 IP），此前这类 403 完全无声，只能靠猜。
 
-### Deployment and upgrade notes
+### 部署与升级须知
 
-- Back up an existing SQLite deployment before changing storage. Stop the old instance cleanly, then migrate its `./data/db` contents into the new named volume and set ownership to `10001:10001`. Do not copy a live SQLite database without its consistent WAL state. Alternatively, retain the old bind mount at `/app/data` with matching ownership. No migration is automatic, and starting with an empty named volume creates a new database. Old cache contents are optional; file logs are no longer bind-mounted.
-- Export strong, distinct, persistent values for both required Compose variables before `docker compose up --build -d`. Environment values remain visible to Docker administrators. Do not commit a secret-bearing `.env` or share rendered Compose configuration containing credentials. This application does **not** implement `secret_file` or `*_FILE` configuration; merely mounting a secret file would not load it.
-- A configuration file is optional. Uncomment the read-only Compose mount or supply `config.existingConfigMap` in Helm if needed. Only supported `FAKEMBY_*` environment keys are used, and deployment environment values override the mounted file. The image never includes the repository's local `config.yaml`.
-- Before installing Helm, create a Secret in the release namespace named by `secrets.existingSecret` (default `fakemby-secrets`) with nonempty keys `admin-api-key` and `playback-sign-key`. Override the key names in values if necessary. Values/history never need to contain the secret values. Restart the Deployment after rotating secrets or changing the optional subPath-mounted ConfigMap.
-- The chart fixes replicas to one and uses `Recreate`; upgrades may briefly interrupt service. Do not scale the Deployment or share the SQLite volume with another release. A storage driver supporting `fsGroup` must make the claim writable by UID/GID 10001; provision ownership separately if the driver cannot. The chart-created PVC is retained on uninstall; use `persistence.existingClaim` to adopt retained data when reinstalling.
-- Source chart `appVersion` records the historical baseline, not an assertion that an image exists for that tag. Override `image.tag` with a published version when installing from source. Released chart packages receive the actual release version automatically. Forks must override `image.repository` to their own registry path.
+- 更换存储前先备份现有 SQLite 部署。干净停掉旧实例，再把 `./data/db` 的内容（含一致的 WAL 状态）迁进新命名卷，归属改为 `10001:10001`。不要在没有一致 WAL 状态的情况下复制运行中的 SQLite 数据库。或者保留旧的 bind mount 到 `/app/data` 并匹配归属。没有自动迁移，空命名卷会新建数据库。旧缓存可选；文件日志不再挂载。
+- 在 `docker compose up --build -d` 之前，为两个必需的 Compose 变量导出强、互不相同且持久的值。环境变量对 Docker 管理员仍然可见。不要提交含密钥的 `.env`，也不要分享渲染后带凭据的 Compose 配置。本应用**不**实现 `secret_file` 或 `*_FILE` 配置；仅挂载一个密钥文件不会生效。
+- 配置文件是可选的。按需取消 Compose 只读挂载的注释，或在 Helm 中提供 `config.existingConfigMap`。只使用受支持的 `FAKEMBY_*` 环境变量，部署环境变量的值会覆盖挂载的配置文件。镜像内不含仓库本地的 `config.yaml`。
+- 安装 Helm 前，在发布所在命名空间按 `secrets.existingSecret` 指定的名称（默认 `fakemby-secrets`）创建 Secret，键 `admin-api-key` 与 `playback-sign-key` 必须非空。必要时在 values 中覆盖键名。values/history 不需要包含密钥值。轮换密钥或改动可选的 subPath 挂载 ConfigMap 后，重启 Deployment。
+- chart 固定单副本并使用 `Recreate`；升级可能短暂中断服务。不要扩容 Deployment，也不要与其他 release 共用 SQLite 卷。存储驱动需支持 `fsGroup`，才能把 claim 交给 UID/GID 10001 可写；驱动做不到就另行设置归属。chart 创建的 PVC 在卸载时保留；重装时用 `persistence.existingClaim` 接管保留的数据。
+- 源码 chart 的 `appVersion` 记录的是历史基线，不代表该 tag 存在对应镜像。从源码安装时须用已发布版本覆盖 `image.tag`。发布的 chart 包会自动带上实际发布版本。fork 必须把 `image.repository` 覆盖成自己的仓库路径。
 
-### Release conventions
+### 发布约定
 
-- Release tags use `vMAJOR.MINOR.PATCH` or `vMAJOR.MINOR.PATCH-PRERELEASE`, without leading zeroes in numeric identifiers or build metadata. Examples: `v0.10.0`, `v0.10.0-rc.1`. These conventions are compatible with both SemVer and container tags.
-- Before tagging, move relevant entries out of Unreleased into a dated version section. Keep application release versions separate from `server.version`, which advertises Emby protocol compatibility.
-- A tag push publishes GitHub Release archives/checksums/chart and amd64/arm64 images. Container version tags omit the leading `v`; only stable releases update `latest`. Prerelease tags create GitHub prereleases and do not update `latest`.
-- The workflow needs GitHub Actions permissions to write repository releases and GHCR packages. It derives registry ownership from the repository rather than hardcoding publication to an upstream account.
-- Local checks can use `goreleaser check`, `helm lint --strict deploy/helm/fakemby`, `helm template fakemby deploy/helm/fakemby`, and `docker compose config --quiet` with non-secret validation values. GoReleaser writes to `dist/release`, not the existing `dist` runtime directory; the workflow packages charts separately under `dist/charts`.
+- 发布 tag 使用 `vMAJOR.MINOR.PATCH` 或 `vMAJOR.MINOR.PATCH-PRERELEASE`，数字标识符与构建元数据不带前导零。例：`v0.10.0`、`v0.10.0-rc.1`。这些约定同时兼容 SemVer 与容器 tag。
+- 打 tag 前，把相关条目从 Unreleased 移到带日期的版本小节。应用发布版本与 `server.version` 分开维护，后者声明的是 Emby 协议兼容版本。
+- 推送 tag 会发布 GitHub Release 的归档/校验和/chart 与 amd64/arm64 镜像。容器版本 tag 不带前导 `v`；只有稳定版会更新 `latest`。预发布 tag 创建 GitHub 预发布，不更新 `latest`。
+- 工作流需要写入仓库 release 与 GHCR 包的 GitHub Actions 权限。它从仓库派生 registry 归属，不硬编码到上游账号。
+- 本地校验可用 `goreleaser check`、`helm lint --strict deploy/helm/fakemby`、`helm template fakemby deploy/helm/fakemby`、`docker compose config --quiet`（配非密钥的校验值）。GoReleaser 输出到 `dist/release`，不是既有的 `dist` 运行时目录；工作流把 chart 单独打包到 `dist/charts`。
 
 ## [0.9.0-pre]
 
-- Historical pre-release baseline tag referenced by the roadmap. This entry does not claim that release archives or container images were published for that tag.
+- 路线图引用的历史预发布基线 tag。本条目不代表该 tag 曾发布归档或容器镜像。

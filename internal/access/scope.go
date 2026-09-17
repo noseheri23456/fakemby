@@ -32,9 +32,21 @@ func CanAccessLibrary(db *gorm.DB, user *database.User, libraryID string) bool {
 }
 
 // CanAccessItem also accepts library IDs, which Emby uses as CollectionFolders.
+//
+// 虚拟条目（Genre / Studio / Person）没有 library_id，Scope 的谓词会把它们判成
+// "不属于任何库"从而拒绝。但客户端点演员头像时会请求
+// /emby/Users/{uid}/Items/{personId}，一旦 403 就会让详情页的 Promise.all 整体
+// reject，表现为 "Content no longer available"。这类条目只是元数据索引，不含媒体内容，
+// 因此按 ID 直接访问时放行（列表查询仍然走 Scope，不会被带进通用结果里）。
 func CanAccessItem(db *gorm.DB, user *database.User, itemID string) bool {
 	if db == nil || itemID == "" {
 		return false
+	}
+	var kind string
+	if err := db.Model(&database.MediaItem{}).Where("id = ?", itemID).Pluck("type", &kind).Error; err == nil {
+		if IsVirtualType(kind) {
+			return true
+		}
 	}
 	var count int64
 	err := Scope(db, user).Model(&database.MediaItem{}).Where("id = ?", itemID).Count(&count).Error

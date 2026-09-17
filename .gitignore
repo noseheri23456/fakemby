@@ -4,6 +4,7 @@ fakemby.exe
 build_test.exe
 *.exe
 dist/
+dist_old*/
 
 # 运行时数据与日志
 data/

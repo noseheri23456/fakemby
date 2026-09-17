@@ -124,7 +124,7 @@ func libraryToDTO(cfg *config.Config, lib database.Library) types.BaseItemDto {
 		SupportsSync:            true,
 		LockData:                false,
 		ParentID:                "2",
-		Subviews:                []string{lib.Type, "tags", "genres", "folders"},
+		Subviews:                subviewsForCollectionType(lib.Type),
 		DateCreated:             now,
 		DateModified:            now,
 		PrimaryImageAspectRatio: &ratio,
@@ -188,7 +188,7 @@ func getFolders(mediaSvc *service.MediaService) gin.HandlerFunc {
 				Model(&database.MediaItem{}).Count(&childCount)
 
 			childCountInt := int(childCount)
-			subviews2 := []string{lib.Type, "tags", "genres", "folders"}
+			subviews2 := subviewsForCollectionType(lib.Type)
 			now := time.Now().UTC().Format(time.RFC3339Nano)
 			dto := types.BaseItemDto{
 				ID:                      lib.ID,
@@ -273,6 +273,15 @@ func getVirtualFolders(mediaSvc *service.MediaService) gin.HandlerFunc {
 }
 
 func getItems(mediaSvc *service.MediaService) gin.HandlerFunc {
+	return itemsHandler(mediaSvc, "")
+}
+
+// itemsHandler 供 /emby/Items（不带默认类型）与 /emby/Shows、/emby/Movies
+// （库级列表，默认按 Series / Movie 过滤）共用。
+//
+// defaultType 只能在 handler 内部兜底，不能靠外部改写 c.Request.URL.RawQuery 实现：
+// 路径规范化中间件会先读一次查询串，gin 的 queryCache 就此定型，后面再改 RawQuery 已经不生效。
+func itemsHandler(mediaSvc *service.MediaService, defaultType string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		mediaSvc := scopedMediaService(c)
 		userID := c.GetString("user_id")
@@ -285,6 +294,9 @@ func getItems(mediaSvc *service.MediaService) gin.HandlerFunc {
 		parentID := c.Query("ParentId")
 		recursive := c.DefaultQuery("Recursive", "false") == "true"
 		itemTypesStr := c.Query("IncludeItemTypes")
+		if itemTypesStr == "" && defaultType != "" {
+			itemTypesStr = defaultType
+		}
 		sortBy := c.DefaultQuery("SortBy", "Name")
 		sortOrder := c.DefaultQuery("SortOrder", "Ascending")
 		fieldsStr := c.Query("Fields")
@@ -374,6 +386,13 @@ func getItem(mediaSvc *service.MediaService, cfg *config.Config) gin.HandlerFunc
 				c.JSON(http.StatusOK, dto)
 				return
 			}
+			// 也可能是 Genre / Studio / Person 这类虚拟条目：它们不属于任何库，
+			// 会被访问作用域过滤掉。客户端点演员头像时按 ID 请求它，404 同样会
+			// 炸断详情页的 Promise 链。
+			if dto, ok := virtualItemDTO(itemID); ok {
+				c.JSON(http.StatusOK, dto)
+				return
+			}
 			c.JSON(http.StatusNotFound, ErrNotFound)
 			return
 		}
@@ -399,6 +418,30 @@ func libraryByID(mediaSvc *service.MediaService, cfg *config.Config, libraryID s
 		}
 	}
 	return types.BaseItemDto{}, false
+}
+
+// subviewsForCollectionType 返回媒体库的子视图清单（DTO 的 Subviews 字段）。
+//
+// 官方客户端（Emby Theater）完全靠它决定库详情页显示哪些分类入口：tv/tv.js 里
+// Shows / Episodes / Networks 三个 tab 的判断就是
+// subviews.includes("series" / "episodes" / "studios")，不在清单里则整项隐藏。
+// 之前这里返回 [库类型, "tags", "genres", "folders"]，剧集库拿到的第一个元素是
+// "tvshows" 而不是 "series" → "剧集"入口消失，也进不了单集视图，
+// 连带只在单集视图里出现的"节目名称"排序也永远看不到。
+//
+// 电影库同理走 videos.js：它按 includes("videos") || includes("movies") 判断
+// 主入口，所以两个值都要给。
+func subviewsForCollectionType(collectionType string) []string {
+	switch collectionType {
+	case "tvshows":
+		return []string{"series", "episodes", "suggestions", "upcoming", "favorites",
+			"genres", "studios", "tags", "folders"}
+	case "movies":
+		return []string{"movies", "videos", "trailers", "collections", "suggestions",
+			"favorites", "genres", "tags", "folders"}
+	default:
+		return []string{collectionType, "tags", "genres", "folders"}
+	}
 }
 
 func getLatest(mediaSvc *service.MediaService) gin.HandlerFunc {

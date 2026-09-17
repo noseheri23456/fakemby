@@ -1,13 +1,15 @@
 package emby
 
 import (
+	"log/slog"
+	"net/http"
+	"strings"
+
 	"github.com/fakemby/fakemby/internal/access"
 	"github.com/fakemby/fakemby/internal/database"
 	"github.com/fakemby/fakemby/internal/service"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
-	"net/http"
-	"strings"
 )
 
 func scopedMediaDB(c *gin.Context) *gorm.DB {
@@ -47,6 +49,11 @@ func authorizeMediaRequest(c *gin.Context, user *database.User) bool {
 		var lib database.Library
 		found := database.Get().Where("id = ?", id).First(&item).Error == nil || database.Get().Where("id = ?", id).First(&lib).Error == nil
 		if found && !access.CanAccessItem(database.Get(), user, id) {
+			slog.Warn("拒绝访问媒体条目",
+				"user", user.ID, "item_id", id,
+				"path", c.Request.URL.Path,
+				"remote_ip", c.ClientIP(),
+			)
 			c.AbortWithStatusJSON(http.StatusForbidden, ErrForbidden)
 			return false
 		}

@@ -25,6 +25,8 @@ func RegisterAll(r *gin.Engine, cfg *config.Config) {
 	adminapi.RegisterAdminItemRoutes(r)
 	adminapi.RegisterImportRoutes(r)
 	adminapi.RegisterAdminUserRoutes(r)
+	// 注意：不要在这里再调 RegisterAdminExtraRoutes——RegisterAdminUserRoutes 末尾已经调过，
+	// 重复注册会让 gin 直接 panic（handlers are already registered）。
 	emby.RegisterPlaybackRoutes(r, cfg)
 	emby.RegisterSessionRoutes(r, cfg)
 	emby.RegisterImageRoutes(r, cfg)

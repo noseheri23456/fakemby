@@ -141,6 +141,15 @@ func (p Policy) AllowsItem(item *database.MediaItem) bool {
 	return p.MaxParentalRating == nil || level <= *p.MaxParentalRating
 }
 
+// VirtualTypes 是不属于任何媒体库的元数据索引条目（type = Genre / Studio / Person）。
+// 它们的 library_id 恒为空，所以任何"必须属于某个库"的判定都会把客户端对演员页、
+// 分类页的访问一并拒掉。这里集中列出，避免各处各写一份字符串字面量。
+var VirtualTypes = []string{"genre", "studio", "person"}
+
+func IsVirtualType(kind string) bool {
+	return contains(VirtualTypes, strings.ToLower(strings.TrimSpace(kind)))
+}
+
 func IsPlaybackAllowed(user *database.User) bool {
 	p, err := Normalize(user)
 	return err == nil && !p.IsDisabled && p.EnableMediaPlayback

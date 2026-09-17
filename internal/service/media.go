@@ -161,10 +161,19 @@ func (s *MediaService) ItemToDTO(item *database.MediaItem, userID string, includ
 		dto.ParentID = parentIDStr
 	}
 	if includeAll || shouldIncludeField(includeFields, "IndexNumber") {
-		dto.IndexNumber = item.EpisodeNumber
+		// 季没有集号，客户端靠 IndexNumber 认季号并排序；只填 EpisodeNumber 会让季列表全空
+		if item.Type == "Season" {
+			dto.IndexNumber = item.SeasonNumber
+		} else {
+			dto.IndexNumber = item.EpisodeNumber
+		}
 	}
 	if includeAll || shouldIncludeField(includeFields, "ParentIndexNumber") {
-		dto.ParentIndexNumber = item.SeasonNumber
+		if item.Type == "Season" {
+			dto.ParentIndexNumber = nil
+		} else {
+			dto.ParentIndexNumber = item.SeasonNumber
+		}
 	}
 	if includeAll || shouldIncludeField(includeFields, "DateCreated") {
 		dto.DateCreated = item.DateCreated.Format(time.RFC3339)

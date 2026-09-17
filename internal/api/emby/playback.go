@@ -199,8 +199,18 @@ func getPlaybackInfo(mediaSvc *service.MediaService, playbackSvc *service.Playba
 
 		// 获取媒体源
 		sources, err := playbackSvc.GetMediaSources(itemID)
-		if err != nil || len(sources) == 0 {
+		if err != nil {
 			c.JSON(http.StatusNotFound, ErrNotFound)
+			return
+		}
+		// 整部剧（Series）本身没有播放源，但官方客户端进详情页时会顺带拉一次
+		// PlaybackInfo 用于背景视频预览。返回 404 会打断客户端的 Promise 链，
+		// 因此这里按 Emby 的行为返回空源列表，而不是 NotFound。
+		if len(sources) == 0 {
+			c.JSON(http.StatusOK, PlaybackInfoResponse{
+				MediaSources:  []types.MediaSourceDto{},
+				PlaySessionId: fmt.Sprintf("%s-%s", itemID, userID),
+			})
 			return
 		}
 

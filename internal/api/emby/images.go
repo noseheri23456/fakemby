@@ -11,7 +11,30 @@ import (
 	"github.com/fakemby/fakemby/internal/infra/signer"
 	"github.com/fakemby/fakemby/internal/service"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
+
+// imageAuth 决定图片端点是否需要凭据。
+//
+//   - image.require_auth = true：一律走 playbackAuth（token 或签名任一有效）。
+//   - 请求带了 token / api_key / sig：照样完整校验，"带错凭据"不会比"不带"更宽松。
+//   - 什么都没带：按匿名放行。Emby 官方就是这个行为，因为客户端用 <img src> 拉图，
+//     既无法带请求头，Theater 的 getImageUrl 也不会拼 api_key。
+func imageAuth(sgn *signer.Signer, expiryDays int, requireAuth bool) gin.HandlerFunc {
+	strict := playbackAuth(sgn, expiryDays)
+	return func(c *gin.Context) {
+		if requireAuth || hasImageCredential(c) {
+			strict(c)
+			return
+		}
+		c.Set("auth_method", "anonymous-image")
+		c.Next()
+	}
+}
+
+func hasImageCredential(c *gin.Context) bool {
+	return getTokenFromRequest(c) != "" || c.Query("sig") != ""
+}
 
 func RegisterImageRoutes(router *gin.Engine, cfg *config.Config) {
 	imgSvc := service.NewImageService(database.Get(), cfg.Image.Mode, cfg.Image.CacheDir, cfg.Image.CacheMaxMB)
@@ -23,7 +46,9 @@ func RegisterImageRoutes(router *gin.Engine, cfg *config.Config) {
 	// 强制鉴权会让海报/背景图整片 404，而视频播放正常——用户只会以为"刮削没生效"，
 	// 极难联想到是鉴权问题（MediaStationGo / nowen 都对此公开）。
 	// 用 playbackAuth 而不是完全放开：匿名请求仍需持有效签名，不会把整个图库暴露出去。
-	imgAuth := playbackAuth(signer.New(cfg.Playback.SignKey, cfg.Playback.SignTTL), cfg.Auth.TokenExpiryDays)
+	// 但官方客户端（Theater）是用 <img src> 拉图的，getImageUrl 不会拼 api_key，
+	// 一律要求凭据会让海报整片 401。所以默认允许匿名读取，可用 image.require_auth 收紧。
+	imgAuth := imageAuth(signer.New(cfg.Playback.SignKey, cfg.Playback.SignTTL), cfg.Auth.TokenExpiryDays, cfg.Image.RequireAuth)
 
 	// 媒体项图片
 	router.GET("/emby/Items/:itemId/Images/:imageType", imgAuth, getItemImage(imgSvc, mediaSvc, cfg))
@@ -43,7 +68,7 @@ func getItemImage(imgSvc *service.ImageService, mediaSvc *service.MediaService, 
 		maxHeight, _ := strconv.Atoi(c.DefaultQuery("MaxHeight", "0"))
 
 		// 获取图片 URL
-		imageURL, err := imgSvc.GetImage(itemID, imageType, -1, maxWidth, maxHeight)
+		imageURL, err := resolveImageURL(imgSvc, mediaSvc, itemID, imageType, -1, maxWidth, maxHeight)
 		if err != nil {
 			c.JSON(http.StatusNotFound, ErrNotFound)
 			return
@@ -81,7 +106,7 @@ func getItemImageByIndex(imgSvc *service.ImageService, mediaSvc *service.MediaSe
 		maxHeight, _ := strconv.Atoi(c.DefaultQuery("MaxHeight", "0"))
 
 		// 获取指定索引的图片
-		imageURL, err := imgSvc.GetImage(itemID, imageType, index, maxWidth, maxHeight)
+		imageURL, err := resolveImageURL(imgSvc, mediaSvc, itemID, imageType, index, maxWidth, maxHeight)
 		if err != nil {
 			c.JSON(http.StatusNotFound, ErrNotFound)
 			return
@@ -100,6 +125,29 @@ func getItemImageByIndex(imgSvc *service.ImageService, mediaSvc *service.MediaSe
 	}
 }
 
+// resolveImageURL 按回退链找图：本条目指定类型 → 同条目 Thumb/Backdrop → 沿父链
+// （Episode→Season→Series）逐级找 Primary/Thumb/Backdrop。
+//
+// 官方客户端只请求 Primary，而集和季经常只有 Thumb（单帧截图）或干脆没图；
+// 不做回退的话这些卡片就是一片空白，看起来像"刮削没生效"。
+// 官方 Emby 也是这个继承顺序，所以沿用。
+func resolveImageURL(imgSvc *service.ImageService, mediaSvc *service.MediaService,
+	itemID, imageType string, index, maxWidth, maxHeight int) (string, error) {
+	if u, err := imgSvc.GetImage(itemID, imageType, index, maxWidth, maxHeight); err == nil && u != "" {
+		return u, nil
+	}
+	types := []string{imageType}
+	if strings.EqualFold(imageType, "Primary") {
+		types = append(types, "Thumb", "Backdrop")
+	}
+	for _, t := range types {
+		if u, err := imgSvc.GetInheritedImage(itemID, t, mediaSvc); err == nil && u != "" {
+			return u, nil
+		}
+	}
+	return "", gorm.ErrRecordNotFound
+}
+
 // isLocalFilePath 判断 GetImage 返回的是本地文件路径还是外部 URL。
 // proxy_cache 模式下 ImageService 返回 filepath.Join 清洗过的路径（可能是
 // "cache/images/..." 这样的相对路径，开头没有 "./"），因此只能反向判断：
@@ -113,7 +161,7 @@ func getUserImage(imgSvc *service.ImageService, cfg *config.Config) gin.HandlerF
 		userID := c.Param("userId")
 
 		// 获取用户头像
-		// 这里简化处理：用户没有单独的图片表，可以从用户表的 image_url 字段获取
+		// 用户没有单独的图片表，可以从用户表的 image_url 字段获取
 		var user database.User
 		if err := database.Get().Where("id = ?", userID).First(&user).Error; err != nil {
 			c.JSON(http.StatusNotFound, ErrNotFound)

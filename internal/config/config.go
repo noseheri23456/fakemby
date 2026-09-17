@@ -64,6 +64,11 @@ type ImageConfig struct {
 	CacheDir   string `mapstructure:"cache_dir"`
 	CacheMaxMB int    `mapstructure:"cache_max_mb"` // 代理缓存磁盘配额（MB）；0=不限（A6）
 	CDNPrefix  string `mapstructure:"cdn_prefix"`
+	// RequireAuth 为 true 时图片端点强制校验 token/签名，匿名请求一律 401。
+	// 默认 false：Emby 官方的图片端点允许匿名读取，因为客户端是用 <img src> 拉图的，
+	// 既带不了请求头，Theater 的 apiClient.getImageUrl 也不会拼 api_key
+	// （只有 WebSocket 等少数接口才显式加）。要求鉴权会让海报/背景整片 401。
+	RequireAuth bool `mapstructure:"require_auth"`
 }
 
 type PlaybackConfig struct {
@@ -171,6 +176,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("image.cache_dir", "./cache/images")
 	v.SetDefault("image.cache_max_mb", 0)
 	v.SetDefault("image.cdn_prefix", "")
+	v.SetDefault("image.require_auth", false)
 
 	v.SetDefault("playback.redirect_mode", "signed")
 	v.SetDefault("playback.bind_ip", false)
@@ -196,7 +202,7 @@ func bindEnvKeys(v *viper.Viper) {
 		"server.host", "server.port", "server.name", "server.version", "server.id", "server.cors_origins",
 		"database.dialect", "database.dsn", "database.path", "database.wal_mode", "database.max_open_conns", "database.max_idle_conns",
 		"auth.token_expiry_days", "auth.login_max_attempts", "auth.login_lock_minutes",
-		"image.mode", "image.cache_dir", "image.cache_max_mb", "image.cdn_prefix",
+		"image.mode", "image.cache_dir", "image.cache_max_mb", "image.cdn_prefix", "image.require_auth",
 		"playback.redirect_mode", "playback.bind_ip", "playback.plain_prefixes", "playback.strm_root", "playback.redirect", "playback.sign_key", "playback.sign_ttl", "playback.flush_interval", "playback.sign_prefixes",
 		"admin.api_key",
 		"log.level", "log.file",
