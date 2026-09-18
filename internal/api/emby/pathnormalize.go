@@ -212,7 +212,9 @@ func (n *embyNormalizer) canonicalize(cand string) string {
 		return exact
 	}
 	if cached, ok := n.cache.Load(lower); ok {
-		if rp, ok := cached.(*routePattern); ok {
+		// 未命中时存的是 typed-nil（(*routePattern)(nil)），类型断言会成功但值是 nil，
+		// 直接 rebuild 就是 nil 指针 panic —— 表现为未注册路径第二次请求连接被掐断。
+		if rp, _ := cached.(*routePattern); rp != nil {
 			return rp.rebuild(splitPath(cand))
 		}
 		return ""

@@ -18,6 +18,7 @@
 - 工具：`scripts/tools/xiaoya_import.py` —— 把小雅（emby.xiaoya.pro）「每日更新」目录里的 NFO 元数据、自带图片与 strm 直链翻译成 `/api/admin/import` 请求，支持 scan / build / push / run 四种子命令、目录抓取缓存、库类型自动设置、按上限分批、直链前缀重写与导入前直链体检。用法见 `docs/XIAOYA_IMPORT.md`。
 - Emby API 兼容：新增 `GET /emby/Shows` 与 `GET /emby/Movies`（含小写变体），默认分别按 Series / Movie 过滤。官方客户端进入库视图时打的就是这两个路径，此前返回 404。
 - Emby API 兼容：新增推荐位端点 `Movies/Recommendations`、`Shows/Recommendations`、`Items/{id}/Recommendations`（含带用户 ID 的变体），返回空结果集。客户端首页请求它们时收到 404 会让整行推荐消失。
+- Emby API 兼容：新增 `GET /emby/ItemTypes`，返回命中搜索词的类型清单（`{Items:[{Name,Count}]}`，按命中数降序，只含 Movie/Series/Season/Episode）。官方客户端搜索页是 `Promise.all([/emby/Users/{uid}/Items, /emby/ItemTypes])`，用后者的 `Items` 渲染"电影 / 剧集 / …"分类行；缺这个端点时整条 Promise 链 reject，表现为输入关键词后什么都不显示。
 - 配置：新增 `image.require_auth`（默认 `false`，可用 `FAKEMBY_IMAGE_REQUIRE_AUTH` 覆盖）。为 `true` 时图片端点强制校验凭据；默认关闭，与 Emby 官方一致。
 
 ### 变更
@@ -48,6 +49,7 @@
 - 访问控制不再拒绝 Genre / Studio / Person 虚拟条目。它们没有 `library_id`，被"必须属于某个库"的谓词判为越权：客户端点演员头像时请求 `/emby/Users/{uid}/Items/{人物ID}` 得到 403，详情页的 `Promise.all` 整体 reject，显示 "Content no longer available"。按 ID 直接访问时放行，列表查询仍受作用域约束；同时新增 `virtualItemDTO`，让条目详情与 `Similar` 都能正确应答这类 ID。
 - 媒体库的 `Subviews` 按类型生成（`tvshows` 含 `series` / `episodes` / `studios`，`movies` 含 `movies` / `videos` 等），不再一律返回 `[库类型, tags, genres, folders]`。Emby Theater 的 `tv/tv.js` 按 `subviews.includes("series")` 决定"剧集"入口是否显示，按 `includes("episodes")` 决定"单集"视图是否显示——清单里没有这两项时，剧集库的分类栏会少掉整个"剧集"分类，也进不了单集视图（连带只在单集视图里出现的"节目名称"排序也用不上）。
 - `PlaybackInfo` 对没有播放源的条目（例如整部剧）返回空 `MediaSources`，不再返回 404。官方客户端进详情页时会顺带拉一次用于背景预览，404 会打断请求链。
+- 路径归一化的路由缓存不再把"未命中"存成 typed-nil。`(*routePattern)(nil)` 存进 `sync.Map` 后，下次读取时类型断言会成功但值是 `nil`，紧接着的解引用就是 nil 指针 panic —— 表现为**同一个未注册路径的第二次请求连接被掐断**，客户端拿到网络错误而不是 404。官方客户端搜索页的 `Promise.all` 里只要有一条被打断，整个搜索就一片空白。
 - 访问被拒时记录审计日志（用户、条目 ID、路径、来源 IP），此前这类 403 完全无声，只能靠猜。
 
 ### 部署与升级须知

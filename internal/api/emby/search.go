@@ -3,6 +3,7 @@ package emby
 import (
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -12,6 +13,59 @@ import (
 	"github.com/fakemby/fakemby/internal/types"
 	"github.com/gin-gonic/gin"
 )
+
+type itemTypeDto struct {
+	Name  string `json:"Name"`
+	Count int64  `json:"Count"`
+}
+
+// getItemTypes 返回命中搜索词的类型清单（按命中数降序）。
+//
+// 只统计 Movie / Series / Season / Episode 这类可展示的媒体类型：虚拟条目
+// （Person/Genre/Studio）被客户端拿去当 IncludeItemTypes 再查一次会拿到空列表，
+// 于是多出一个空分类。
+func getItemTypes() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		searchTerm := strings.TrimSpace(c.DefaultQuery("SearchTerm", ""))
+		items := []itemTypeDto{}
+		if searchTerm != "" {
+			hits, _, err := service.NewSearchService(scopedMediaDB(c)).
+				SearchItems(searchTerm, nil, 0, 500)
+			if err != nil {
+				slog.Error("搜索类型统计失败", "error", err)
+			} else {
+				counts := map[string]int64{}
+				order := []string{}
+				for _, it := range hits {
+					if !searchableType[it.Type] {
+						continue
+					}
+					if _, ok := counts[it.Type]; !ok {
+						order = append(order, it.Type)
+					}
+					counts[it.Type]++
+				}
+				sort.SliceStable(order, func(i, j int) bool {
+					return counts[order[i]] > counts[order[j]]
+				})
+				for _, t := range order {
+					items = append(items, itemTypeDto{Name: t, Count: counts[t]})
+				}
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"Items":            items,
+			"TotalRecordCount": len(items),
+		})
+	}
+}
+
+var searchableType = map[string]bool{
+	"Movie":   true,
+	"Series":  true,
+	"Season":  true,
+	"Episode": true,
+}
 
 type SearchHintsRequest struct {
 	SearchTerm       string `form:"SearchTerm"`
@@ -27,6 +81,10 @@ type SearchHintsResponse struct {
 
 func RegisterSearchRoutes(router *gin.Engine, cfg *config.Config) {
 	router.GET("/emby/Search/Hints", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), searchHints())
+	// 官方客户端（Emby Theater）的搜索页是 Promise.all([getItems, getItemTypes])，
+	// 后者打的就是 /emby/ItemTypes，用它返回的类型列表渲染"电影 / 剧集 / …"分类行。
+	// 缺这个端点时整条 Promise 链 reject，表现为"输入关键词后什么都没有"。
+	router.GET("/emby/ItemTypes", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), getItemTypes())
 	router.GET("/emby/Items/:itemId/Similar", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), getSimilarItems())
 	router.GET("/emby/items/:itemId/similar", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), getSimilarItems())
 }

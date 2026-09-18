@@ -150,6 +150,36 @@ func TestLibraryMediaFolders(t *testing.T) {
 	require.NotEmpty(t, res.Array(t, "Items"))
 }
 
+// TestUnknownPathStaysNotFound 覆盖未注册路径：路径归一化的路由缓存曾把"未命中"
+// 存成 typed-nil（(*routePattern)(nil)），第二次请求时类型断言成功但值是 nil，
+// 直接 nil 指针 panic —— 连接被掐断，客户端拿到的是网络错误而不是 404。
+//
+// 官方客户端搜索页是 Promise.all([/emby/Users/{uid}/Items, /emby/ItemTypes])，
+// 只要有任一条被打断，整个搜索就"输入了关键词但什么都不显示"。
+func TestUnknownPathStaysNotFound(t *testing.T) {
+	a, _ := newAPI(t)
+
+	for i := 1; i <= 3; i++ {
+		res := a.get("/emby/NoSuchEndpointForTest", "")
+		require.Equalf(t, http.StatusNotFound, res.Status,
+			"第 %d 次请求未注册路径应稳定 404（实际 %d）", i, res.Status)
+	}
+}
+
+// TestItemTypesEndpoint 覆盖搜索页并行请求的 /emby/ItemTypes。
+// 客户端拿它的 Items 渲染"电影 / 剧集 / …"分类行，缺这个端点会让整条 Promise 链 reject。
+func TestItemTypesEndpoint(t *testing.T) {
+	a, _ := newAPI(t)
+
+	res := a.get("/emby/ItemTypes?SearchTerm=test", testutil.NormalToken)
+	require.Equal(t, http.StatusOK, res.Status, string(res.Body))
+
+	body := res.JSON(t)
+	require.Contains(t, body, "Items")
+	items, _ := body["Items"].([]interface{})
+	require.NotNil(t, items, "Items 必须是数组（客户端直接读 .length）")
+}
+
 // TestTokenChannels 覆盖 Emby 生态真实的 token 携带方式。
 //
 // 缺一条通道的表现是"密码明明对，服务器就是认不出 token"，排查起来极痛苦。
