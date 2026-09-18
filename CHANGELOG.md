@@ -15,7 +15,12 @@
 - 元数据：`MediaItem` 新增 `Countries` 与 `Languages`（以 JSON 存储，出现在 `BaseItemDto` 上，可通过导入与管理端条目 API 写入）。
 - 元数据：`/emby/Persons` 现在从可见条目聚合真实人物，不再返回空桩；`/emby/Persons/{id}` 解析人物，而不是按媒体 ID 查找。
 - 元数据：`?GenreIds=` 与 `?StudioIds=` 过滤器现在会把虚拟条目 ID 还原成名字，因此 `/emby/Genres` 与 `/emby/Studios` 返回的过滤值能真正匹配上。
-- 工具：`scripts/tools/xiaoya_import.py` —— 把小雅（emby.xiaoya.pro）「每日更新」目录里的 NFO 元数据、自带图片与 strm 直链翻译成 `/api/admin/import` 请求，支持 scan / build / push / run 四种子命令、目录抓取缓存、库类型自动设置、按上限分批、直链前缀重写与导入前直链体检。用法见 `docs/XIAOYA_IMPORT.md`。
+- 工具：`scripts/tools/xiaoya_import.py` —— 把小雅（emby.xiaoya.pro）的 NFO 元数据、自带图片、strm 直链与字幕翻译成 `/api/admin/import` 请求，支持 scan / build / push / run / status / reset 六种子命令、目录抓取缓存、库类型自动设置、按上限分批、直链前缀重写与导入前直链体检。用法见 `docs/XIAOYA_IMPORT.md`。
+- 工具：小雅导入覆盖面从「每日更新」3 个分类扩到站点 10 个分类 —— 新增每日更新/动漫剧场版、电影库、电视剧库、动漫库、纪录片、纪录片（已刮削）、综艺；`--category` 支持 `daily`（每日更新四项）与 `all`（全部）。
+- 工具：小雅导入支持**断点续传** —— 进度分两份落盘（`state.json` 记每个目录的内容签名与构建/推送状态，`items/<分类>.jsonl` 存构建结果），每 `--flush-every`（默认 5）个目录存一次盘，中断或崩溃后重跑只补没做完的；`Ctrl+C` 会先存盘再退出。
+- 工具：小雅导入支持**日常增量更新** —— 目录内容签名未变即复用（一个请求都不发），签名变了才重建；`--since-days` 只跟进最近 N 天动过的已知条目（新目录不受限），`--cache-ttl` 控制目录列表保鲜；推送侧单独记 `pushed_sig`，构建过但没推成功的下次自动补推。配套 `--full` / `--push-all` / `--retry-failed` / `--compact` 与 `status` / `reset` 两个子命令。
+- 工具：小雅导入支持**集平铺在剧目录里**的剧集（`tvshow.nfo` 但没有 `Season N/` 目录，小雅的 TVB Viu 就是这么摆的）：按集号归组，同一集的多条音轨（`01粤语` + `01国语`）合成一集多条源，而不是两集同名条目。
+- 工具：小雅导入新增元数据字段 —— 外链（由 ProviderIds 拼 IMDb/TMDB/TheTVDB，不发请求）、音轨语言（nfo 的 `<language>` 与复数 `<languages>` 都认）、按 stem 配对的字幕与语言猜测（`--sub-lang-default`，默认 `zho`）、跟片名走的图片（`{stem}-poster` / `-thumb` / `-fanart` 等）与季海报（季目录找不到时回退剧集根目录）。
 - Emby API 兼容：新增 `GET /emby/Shows` 与 `GET /emby/Movies`（含小写变体），默认分别按 Series / Movie 过滤。官方客户端进入库视图时打的就是这两个路径，此前返回 404。
 - Emby API 兼容：新增推荐位端点 `Movies/Recommendations`、`Shows/Recommendations`、`Items/{id}/Recommendations`（含带用户 ID 的变体），返回空结果集。客户端首页请求它们时收到 404 会让整行推荐消失。
 - Emby API 兼容：新增 `GET /emby/ItemTypes`，返回命中搜索词的类型清单（`{Items:[{Name,Count}]}`，按命中数降序，只含 Movie/Series/Season/Episode）。官方客户端搜索页是 `Promise.all([/emby/Users/{uid}/Items, /emby/ItemTypes])`，用后者的 `Items` 渲染"电影 / 剧集 / …"分类行；缺这个端点时整条 Promise 链 reject，表现为输入关键词后什么都不显示。
@@ -37,6 +42,10 @@
 
 ### 修复
 
+- 小雅导入：进度仓库改成「一行一个目录」。此前一行一条目、按目录 key 覆盖，散装目录（一个目录几百部片）重跑或 `--push-all` 时只剩最后一条，导出和推送都会大面积丢条目。
+- 小雅导入：散装目录的判定提到 `movie.nfo` / `tvshow.nfo` 之前。此前「目录里有一部剧 + 一堆平铺的片」会被判成单条目，只出 1 条且名字取错。
+- 小雅导入：nfo 解析失败时不再整条丢弃。小雅少数 nfo 把两个根元素直接拼在一个文件里（如 `纪录片/【历史影像】`），现在包一层假根取第一个有效节点。
+- 小雅导入：目录发现改为分块推进，不再每层全展开。此前扫 6 条结果要发 574 次请求，现在 95 次。
 - 管理端删除用户不再无条件返回成功。`db.Transaction(...)` 返回的本身就是 `error`，多取一次 `.Error` 拿到的是该错误的 `Error` 方法值（永不为 `nil`），失败被完全吞掉，接口总是返回 `204`。
 - `/emby/Branding/Configuration` 不再要求认证；Web 客户端在还没有 token 时就要从登录页取它，此前每次请求都返回 401。
 - `/emby/Sessions/Capabilities`（非 `Full` 变体）现在匿名可访问，并接受 GET、POST、HEAD；客户端常在拿到有效 token 之前上报设备能力。
