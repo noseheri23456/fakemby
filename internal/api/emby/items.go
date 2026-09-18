@@ -64,7 +64,7 @@ func RegisterItemRoutes(router *gin.Engine, cfg *config.Config) {
 
 	// 演员列表（小幻等客户端请求收藏演员）
 	// 此前是恒返回 0 条的空桩，改为从可见条目聚合（实现见 compat_extra.go 的 peopleList）
-	router.GET("/emby/Persons", authMiddleware, peopleList())
+	router.GET("/emby/Persons", authMiddleware, peopleList(cfg.Server.ID))
 }
 
 func getViews(mediaSvc *service.MediaService, cfg *config.Config) gin.HandlerFunc {
@@ -389,7 +389,7 @@ func getItem(mediaSvc *service.MediaService, cfg *config.Config) gin.HandlerFunc
 			// 也可能是 Genre / Studio / Person 这类虚拟条目：它们不属于任何库，
 			// 会被访问作用域过滤掉。客户端点演员头像时按 ID 请求它，404 同样会
 			// 炸断详情页的 Promise 链。
-			if dto, ok := virtualItemDTO(itemID); ok {
+			if dto, ok := virtualItemDTO(itemID, cfg.Server.ID); ok {
 				c.JSON(http.StatusOK, dto)
 				return
 			}

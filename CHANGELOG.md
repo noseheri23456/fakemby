@@ -19,6 +19,7 @@
 - Emby API 兼容：新增 `GET /emby/Shows` 与 `GET /emby/Movies`（含小写变体），默认分别按 Series / Movie 过滤。官方客户端进入库视图时打的就是这两个路径，此前返回 404。
 - Emby API 兼容：新增推荐位端点 `Movies/Recommendations`、`Shows/Recommendations`、`Items/{id}/Recommendations`（含带用户 ID 的变体），返回空结果集。客户端首页请求它们时收到 404 会让整行推荐消失。
 - Emby API 兼容：新增 `GET /emby/ItemTypes`，返回命中搜索词的类型清单（`{Items:[{Name,Count}]}`，按命中数降序，只含 Movie/Series/Season/Episode）。官方客户端搜索页是 `Promise.all([/emby/Users/{uid}/Items, /emby/ItemTypes])`，用后者的 `Items` 渲染"电影 / 剧集 / …"分类行；缺这个端点时整条 Promise 链 reject，表现为输入关键词后什么都不显示。
+- 工具：`scripts/dev/probe_similar_person.py` —— 对着已启动的服务实测"相似条目"与"人物详情"两条链路：`Similar?IncludeItemTypes=Program` 必须为空、`Similar` 不带类型必须非空、人物/分类列表与详情 DTO 必须带 `ServerId`。用法 `python scripts/dev/probe_similar_person.py`（可用 `FAKEMBY_PROBE_BASE` / `_USER` / `_PW` 覆盖）。
 - 配置：新增 `image.require_auth`（默认 `false`，可用 `FAKEMBY_IMAGE_REQUIRE_AUTH` 覆盖）。为 `true` 时图片端点强制校验凭据；默认关闭，与 Emby 官方一致。
 
 ### 变更
@@ -51,6 +52,9 @@
 - `PlaybackInfo` 对没有播放源的条目（例如整部剧）返回空 `MediaSources`，不再返回 404。官方客户端进详情页时会顺带拉一次用于背景预览，404 会打断请求链。
 - 路径归一化的路由缓存不再把"未命中"存成 typed-nil。`(*routePattern)(nil)` 存进 `sync.Map` 后，下次读取时类型断言会成功但值是 `nil`，紧接着的解引用就是 nil 指针 panic —— 表现为**同一个未注册路径的第二次请求连接被掐断**，客户端拿到网络错误而不是 404。官方客户端搜索页的 `Promise.all` 里只要有一条被打断，整个搜索就一片空白。
 - 访问被拒时记录审计日志（用户、条目 ID、路径、来源 IP），此前这类 403 完全无声，只能靠猜。
+- `/emby/Items/{id}/Similar` 现在遵循 `?IncludeItemTypes=`。Emby Theater 的 `itemhelper.supportsSimilarItemsOnLiveTV` 对 Movie / Trailer / Series **无条件返回 true**，是否显示"更多类似的直播电视"栏目完全取决于该请求是否返回空。此前忽略过滤参数，于是拿库里的电影去填 `IncludeItemTypes=Program` 的请求，详情页凭空多出一栏直播电视。没有直播电视时现在答空集，客户端自行隐藏整栏。
+- 虚拟条目与分类列表的 DTO 现在回填 `ServerId`（人物详情、`/emby/Genres`、`/emby/Studios`、`/emby/Persons`）。客户端用 `item.ServerId` 反查 apiClient，缺失时 `connectionManager.getApiClient(item)` 返回 undefined，紧接着的 `apiClient.getItems(...)` 抛 TypeError，人物详情页整页空白。
+- 相似条目不再因为条件过严而返回空集。`FindSimilarItems` 原先同时要求"同类型 + 同流派 + 年份 ±3"，三者一起收紧时命中率极低（实测小样本库里电影的相似项恒为 0 条，"类似影片"整栏消失）。改为逐级放宽——同类型+同流派+相近年份 → +同流派 → +相近年份 → 仅同类型——并逐级去重累积到 `Limit` 为止，相关度高的排在前面。
 
 ### 部署与升级须知
 

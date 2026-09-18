@@ -14,6 +14,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// parseItemTypes 解析 ?IncludeItemTypes=Movie,Series 这类过滤条件（大小写不敏感）。
+func parseItemTypes(raw string) map[string]bool {
+	out := map[string]bool{}
+	for _, t := range strings.Split(raw, ",") {
+		if t = strings.TrimSpace(t); t != "" {
+			out[strings.ToLower(t)] = true
+		}
+	}
+	return out
+}
+
 type itemTypeDto struct {
 	Name  string `json:"Name"`
 	Count int64  `json:"Count"`
@@ -85,8 +96,8 @@ func RegisterSearchRoutes(router *gin.Engine, cfg *config.Config) {
 	// 后者打的就是 /emby/ItemTypes，用它返回的类型列表渲染"电影 / 剧集 / …"分类行。
 	// 缺这个端点时整条 Promise 链 reject，表现为"输入关键词后什么都没有"。
 	router.GET("/emby/ItemTypes", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), getItemTypes())
-	router.GET("/emby/Items/:itemId/Similar", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), getSimilarItems())
-	router.GET("/emby/items/:itemId/similar", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), getSimilarItems())
+	router.GET("/emby/Items/:itemId/Similar", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), getSimilarItems(cfg))
+	router.GET("/emby/items/:itemId/similar", AuthTokenMiddleware(cfg.Auth.TokenExpiryDays), getSimilarItems(cfg))
 }
 
 func searchHints() gin.HandlerFunc {
@@ -181,7 +192,7 @@ func searchHints() gin.HandlerFunc {
 	}
 }
 
-func getSimilarItems() gin.HandlerFunc {
+func getSimilarItems(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		itemID := c.Param("itemId")
 		limit, _ := strconv.Atoi(c.DefaultQuery("Limit", "20"))
@@ -190,13 +201,18 @@ func getSimilarItems() gin.HandlerFunc {
 		mediaSvc := service.NewMediaService(db)
 		searchSvc := service.NewSearchService(db)
 
+		// 客户端会用同一个端点问"直播电视里类似的节目"（IncludeItemTypes=Program）。
+		// 不认这个参数的话，那一行会拿我们的电影填进去，于是详情页凭空多出
+		// "更多类似的直播电视"栏目。没有直播电视就答空集，客户端自己会把整栏隐藏。
+		includeTypes := parseItemTypes(c.Query("IncludeItemTypes"))
+
 		// 获取原项目验证存在
 		_, err := mediaSvc.GetItemByID(itemID)
 		if err != nil {
 			// Genre / Studio / Person 这类虚拟条目不属于任何库，会被访问作用域过滤掉；
 			// 但客户端在它们的详情页同样会拉 Similar，404 会炸断详情页的 Promise 链
 			// （表现为 "Content no longer available"）。相似项对它们没有意义，返回空集。
-			if _, ok := virtualItemDTO(itemID); ok {
+			if _, ok := virtualItemDTO(itemID, cfg.Server.ID); ok {
 				c.JSON(http.StatusOK, gin.H{"Items": []types.BaseItemDto{}, "TotalRecordCount": 0})
 				return
 			}
@@ -216,6 +232,9 @@ func getSimilarItems() gin.HandlerFunc {
 		userID := c.GetString("user_id")
 		items := make([]types.BaseItemDto, 0, len(similarItems))
 		for _, simItem := range similarItems {
+			if len(includeTypes) > 0 && !includeTypes[strings.ToLower(simItem.Type)] {
+				continue
+			}
 			dto := mediaSvc.ItemToDTO(&simItem, userID, nil)
 			items = append(items, *dto)
 		}

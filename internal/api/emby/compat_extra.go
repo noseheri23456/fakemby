@@ -26,8 +26,8 @@ func registerExtraCompat(r *gin.Engine, cfg *config.Config) {
 	r.GET("/emby/QuickConnect/Enabled", func(c *gin.Context) {
 		c.JSON(200, gin.H{"Enabled": false})
 	})
-	r.GET("/emby/Genres", auth, taxonomy("Genre"))
-	r.GET("/emby/Studios", auth, taxonomy("Studio"))
+	r.GET("/emby/Genres", auth, taxonomy("Genre", cfg.Server.ID))
+	r.GET("/emby/Studios", auth, taxonomy("Studio", cfg.Server.ID))
 	r.GET("/emby/Persons/:personId", auth, personDetail())
 	r.GET("/emby/Playlists", auth, emptyItemsHandler())
 	r.GET("/emby/Collections", auth, emptyItemsHandler())
@@ -150,7 +150,13 @@ func itemFilters() gin.HandlerFunc {
 		c.JSON(200, gin.H{"Genres": g, "Years": y, "Tags": []string{}, "OfficialRatings": []string{}})
 	}
 }
-func taxonomy(kind string) gin.HandlerFunc {
+
+// taxonomy 返回 Genre / Studio 列表。
+//
+// serverID 必须回填到 DTO：客户端用 item.ServerId 反查 apiClient，
+// 缺失时 connectionManager.getApiClient(item) 拿到 undefined，
+// 再点进分类页就会 TypeError 炸断渲染链（整页空白）。
+func taxonomy(kind string, serverID string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start, limit, ok := pageBounds(c)
 		if !ok {
@@ -193,6 +199,7 @@ func taxonomy(kind string) gin.HandlerFunc {
 			dto.Name = n
 			dto.Type = kind
 			dto.IsFolder = true
+			dto.ServerID = serverID
 			out = append(out, dto)
 		}
 		c.JSON(200, types.ItemsResponse{Items: out, TotalRecordCount: total, StartIndex: start})
@@ -249,7 +256,7 @@ func itemImages() gin.HandlerFunc {
 // 实现上从**当前用户可见的条目**聚合，而不是直接查虚拟条目：虚拟条目没有
 // library_id，会被 access.Scope 的递归 CTE 判为不可见，直接查会全被过滤掉。
 // 这样也顺带保证了受限用户看不到被屏蔽库里的人物。
-func peopleList() gin.HandlerFunc {
+func peopleList(serverID string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start, limit, ok := pageBounds(c)
 		if !ok {
@@ -326,6 +333,7 @@ func peopleList() gin.HandlerFunc {
 			dto.ID = id
 			dto.Name = a.name
 			dto.Type = "Person"
+			dto.ServerID = serverID
 			if a.typ != "" {
 				dto.Type = a.typ
 			}
@@ -384,7 +392,7 @@ func personDetail() gin.HandlerFunc {
 // 分类磁贴时请求的是 /emby/Users/{uid}/Items/{虚拟条目ID}，一旦 404，详情页的
 // Promise.all 就整体 reject，表现为 "Content no longer available"。
 // 它们只含名字和图片，不含媒体内容与播放源，因此直接查全库不构成越权。
-func virtualItemDTO(id string) (*types.BaseItemDto, bool) {
+func virtualItemDTO(id, serverID string) (*types.BaseItemDto, bool) {
 	var item database.MediaItem
 	if database.Get().Where("id = ? AND type IN ?", id, VirtualItemTypes).First(&item).Error != nil {
 		return nil, false
@@ -393,6 +401,10 @@ func virtualItemDTO(id string) (*types.BaseItemDto, bool) {
 	dto.ID = item.ID
 	dto.Name = item.Name
 	dto.Type = item.Type
+	// ServerId 不能省：客户端用 item.ServerId 反查 apiClient，缺失时
+	// connectionManager.getApiClient(item) 拿到 undefined，紧接着
+	// apiClient.getItems(...) 抛 TypeError —— 人物详情页整页渲染不出来（一片空白）。
+	dto.ServerID = serverID
 	var img database.Image
 	if database.Get().Where("item_id = ? AND type = ?", item.ID, "Primary").First(&img).Error == nil && img.Tag != "" {
 		dto.ImageTags = map[string]string{"Primary": img.Tag}

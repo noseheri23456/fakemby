@@ -284,3 +284,28 @@ func TestPersonsListAndFilter(t *testing.T) {
 	require.Equal(t, http.StatusOK, byGenre.Status)
 	require.Equal(t, int(1), len(byGenre.Array(t, "Items")), "GenreIds 应能解析成名字并命中")
 }
+
+// TestVirtualItemListsCarryServerID 客户端用 item.ServerId 反查 apiClient：
+// 列表页与详情页只要有一个缺 ServerId，connectionManager.getApiClient(item)
+// 就返回 undefined，后续 apiClient.getItems(...) 抛 TypeError，整页空白。
+func TestVirtualItemListsCarryServerID(t *testing.T) {
+	a, env := newAPI(t)
+	_, _, personID, _ := seedPersonItem(t)
+	tok := testutil.NormalToken
+
+	for _, path := range []string{"/emby/Genres", "/emby/Studios", "/emby/Persons"} {
+		list := a.get(path, tok)
+		require.Equal(t, http.StatusOK, list.Status, path)
+		items := list.Array(t, "Items")
+		require.NotEmpty(t, items, "%s 不应为空", path)
+		for _, raw := range items {
+			m, ok := raw.(map[string]any)
+			require.True(t, ok)
+			require.NotEmpty(t, m["ServerId"], "%s 返回的 %v 缺 ServerId", path, m["Name"])
+		}
+	}
+
+	detail := a.get("/emby/Items/"+personID, tok)
+	require.Equal(t, http.StatusOK, detail.Status)
+	require.Equal(t, env.Cfg.Server.ID, detail.JSON(t)["ServerId"], "人物详情必须带 ServerId")
+}
