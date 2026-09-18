@@ -285,6 +285,41 @@ func TestPersonsListAndFilter(t *testing.T) {
 	require.Equal(t, int(1), len(byGenre.Array(t, "Items")), "GenreIds 应能解析成名字并命中")
 }
 
+// TestPersonsIsFavoriteFilter 钉死"喜欢"页人物栏的行为。
+//
+// 客户端 home/favorites.js 对 Person 段调的是 apiClient.getPeople（/emby/Persons），
+// 而不是 getItems，并带上 Filters=IsFavorite。列表端点此前完全忽略 Filters，
+// 结果没收藏过任何人也会长出一整栏"喜欢的人物"（库里有多少人就显示多少）。
+func TestPersonsIsFavoriteFilter(t *testing.T) {
+	a, _ := newAPI(t)
+	_, _, personID, genreID := seedPersonItem(t)
+	tok := testutil.NormalToken
+	uid := testutil.NormalUserID
+
+	// 1) 没收藏时必须为空
+	empty := a.get("/emby/Persons?Filters=IsFavorite&UserId="+uid, tok)
+	require.Equal(t, http.StatusOK, empty.Status)
+	require.Empty(t, empty.Array(t, "Items"), "未收藏任何人物时 ?Filters=IsFavorite 必须返回空集")
+
+	// 2) 不带过滤仍要返回全量（不能为了修上面那条把列表也弄空）
+	all := a.get("/emby/Persons?UserId="+uid, tok)
+	require.NotEmpty(t, all.Array(t, "Items"), "/emby/Persons 不带过滤时应返回人物")
+
+	// 3) 收藏后应精确出现这一个
+	require.Equal(t, http.StatusOK, a.post("/emby/Users/"+uid+"/FavoriteItems/"+personID, tok, nil).Status)
+	fav := a.get("/emby/Persons?Filters=IsFavorite&UserId="+uid, tok)
+	items := fav.Array(t, "Items")
+	require.Len(t, items, 1)
+	require.Equal(t, personID, items[0].(map[string]any)["Id"])
+
+	// 4) Genre / Studio 走的是同一个坑（客户端 list 页与"喜欢"页都会带这个参数）
+	gEmpty := a.get("/emby/Genres?Filters=IsFavorite&UserId="+uid, tok)
+	require.Empty(t, gEmpty.Array(t, "Items"), "未收藏任何分类时 /emby/Genres?Filters=IsFavorite 必须为空")
+	require.Equal(t, http.StatusOK, a.post("/emby/Users/"+uid+"/FavoriteItems/"+genreID, tok, nil).Status)
+	gFav := a.get("/emby/Genres?Filters=IsFavorite&UserId="+uid, tok)
+	require.Len(t, gFav.Array(t, "Items"), 1)
+}
+
 // TestVirtualItemListsCarryServerID 客户端用 item.ServerId 反查 apiClient：
 // 列表页与详情页只要有一个缺 ServerId，connectionManager.getApiClient(item)
 // 就返回 undefined，后续 apiClient.getItems(...) 抛 TypeError，整页空白。

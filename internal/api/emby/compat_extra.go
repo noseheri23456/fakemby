@@ -1,11 +1,10 @@
 package emby
 
 import (
-	"crypto/md5"
 	"encoding/json"
-	"fmt"
 	"github.com/fakemby/fakemby/internal/config"
 	"github.com/fakemby/fakemby/internal/database"
+	"github.com/fakemby/fakemby/internal/service"
 	"github.com/fakemby/fakemby/internal/types"
 	"github.com/gin-gonic/gin"
 	"net/http"
@@ -184,6 +183,23 @@ func taxonomy(kind string, serverID string) gin.HandlerFunc {
 			sorted = append(sorted, n)
 		}
 		sort.Strings(sorted)
+
+		// 客户端的"喜欢"页与 list 页会带 Filters=IsFavorite（Genres/Studios 同理），
+		// 不认这个条件就等于把全部分类都当成已收藏，栏位会凭空长出来。
+		favoriteOnly := wantsFavoriteOnly(c)
+		var favorites map[string]bool
+		if favoriteOnly {
+			favorites = favoriteItemIDs(c.GetString("user_id"))
+			kept := make([]string, 0, len(sorted))
+			for _, n := range sorted {
+				id := database.VirtualItemID(strings.ToLower(kind), n)
+				if favorites[id] {
+					kept = append(kept, n)
+				}
+			}
+			sorted = kept
+		}
+
 		total := len(sorted)
 		if start > total {
 			start = total
@@ -195,7 +211,7 @@ func taxonomy(kind string, serverID string) gin.HandlerFunc {
 		out := []types.BaseItemDto{}
 		for _, n := range sorted[start:end] {
 			dto := types.NewBaseItemDto()
-			dto.ID = fmt.Sprintf("%x", md5.Sum([]byte(strings.ToLower(kind)+":"+n)))
+			dto.ID = database.VirtualItemID(strings.ToLower(kind), n)
 			dto.Name = n
 			dto.Type = kind
 			dto.IsFolder = true
@@ -268,6 +284,12 @@ func peopleList(serverID string) gin.HandlerFunc {
 			return
 		}
 
+		favoriteOnly := wantsFavoriteOnly(c)
+		var favorites map[string]bool
+		if favoriteOnly {
+			favorites = favoriteItemIDs(c.GetString("user_id"))
+		}
+
 		type personAgg struct {
 			name  string
 			role  string
@@ -293,6 +315,13 @@ func peopleList(serverID string) gin.HandlerFunc {
 				id := p.ID
 				if id == "" {
 					id = personID(p.Name)
+				}
+				// 客户端「喜欢」页的人物栏打的是 /emby/Persons?Filters=IsFavorite
+				// （home/favorites.js 对 Person 段走 apiClient.getPeople，而不是 getItems）。
+				// 不认这个过滤条件的话，库里每个人物都会被当成"已收藏"，
+				// 于是没收藏过任何人也会长出一整栏"喜欢的人物"。
+				if favoriteOnly && !favorites[id] {
+					continue
 				}
 				a, exists := byID[id]
 				if !exists {
@@ -351,6 +380,30 @@ func peopleList(serverID string) gin.HandlerFunc {
 // ?PersonIds= 筛选永远筛不到结果，且不报错。
 func personID(name string) string {
 	return database.VirtualItemID("person", name)
+}
+
+// wantsFavoriteOnly 判断客户端是否只想要"已收藏"的条目（?Filters=IsFavorite）。
+//
+// 列表端点（/emby/Persons、/emby/Genres、/emby/Studios）此前完全忽略 Filters，
+// 客户端"喜欢"页一带这个参数就把全库条目当成已收藏，栏位凭空长出来。
+func wantsFavoriteOnly(c *gin.Context) bool {
+	return service.ParseFilters(c.Query("Filters"))["IsFavorite"]
+}
+
+// favoriteItemIDs 返回该用户收藏的条目 ID 集合。
+//
+// 收藏状态存在 play_progress.is_favorite 上，虚拟条目（Person/Genre/Studio）
+// 也一样——客户端对它们调的是同一个 FavoriteItems 接口。
+func favoriteItemIDs(userID string) map[string]bool {
+	ids := []string{}
+	database.Get().Model(&database.PlayProgress{}).
+		Where("user_id = ? AND is_favorite = ?", userID, true).
+		Pluck("item_id", &ids)
+	out := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		out[id] = true
+	}
+	return out
 }
 
 // personDetail 返回单个人物。

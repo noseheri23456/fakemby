@@ -20,6 +20,7 @@
 - Emby API 兼容：新增推荐位端点 `Movies/Recommendations`、`Shows/Recommendations`、`Items/{id}/Recommendations`（含带用户 ID 的变体），返回空结果集。客户端首页请求它们时收到 404 会让整行推荐消失。
 - Emby API 兼容：新增 `GET /emby/ItemTypes`，返回命中搜索词的类型清单（`{Items:[{Name,Count}]}`，按命中数降序，只含 Movie/Series/Season/Episode）。官方客户端搜索页是 `Promise.all([/emby/Users/{uid}/Items, /emby/ItemTypes])`，用后者的 `Items` 渲染"电影 / 剧集 / …"分类行；缺这个端点时整条 Promise 链 reject，表现为输入关键词后什么都不显示。
 - 工具：`scripts/dev/probe_similar_person.py` —— 对着已启动的服务实测"相似条目"与"人物详情"两条链路：`Similar?IncludeItemTypes=Program` 必须为空、`Similar` 不带类型必须非空、人物/分类列表与详情 DTO 必须带 `ServerId`。用法 `python scripts/dev/probe_similar_person.py`（可用 `FAKEMBY_PROBE_BASE` / `_USER` / `_PW` 覆盖）。
+- 工具：`scripts/dev/probe_favorites.py` —— 实测收藏过滤：`/emby/Persons`、`/emby/Genres`、`/emby/Studios` 带 `Filters=IsFavorite` 时未收藏必须为空、不带过滤必须全量，收藏/取消收藏一个人物后结果要跟着变。
 - 配置：新增 `image.require_auth`（默认 `false`，可用 `FAKEMBY_IMAGE_REQUIRE_AUTH` 覆盖）。为 `true` 时图片端点强制校验凭据；默认关闭，与 Emby 官方一致。
 
 ### 变更
@@ -55,6 +56,7 @@
 - `/emby/Items/{id}/Similar` 现在遵循 `?IncludeItemTypes=`。Emby Theater 的 `itemhelper.supportsSimilarItemsOnLiveTV` 对 Movie / Trailer / Series **无条件返回 true**，是否显示"更多类似的直播电视"栏目完全取决于该请求是否返回空。此前忽略过滤参数，于是拿库里的电影去填 `IncludeItemTypes=Program` 的请求，详情页凭空多出一栏直播电视。没有直播电视时现在答空集，客户端自行隐藏整栏。
 - 虚拟条目与分类列表的 DTO 现在回填 `ServerId`（人物详情、`/emby/Genres`、`/emby/Studios`、`/emby/Persons`）。客户端用 `item.ServerId` 反查 apiClient，缺失时 `connectionManager.getApiClient(item)` 返回 undefined，紧接着的 `apiClient.getItems(...)` 抛 TypeError，人物详情页整页空白。
 - 相似条目不再因为条件过严而返回空集。`FindSimilarItems` 原先同时要求"同类型 + 同流派 + 年份 ±3"，三者一起收紧时命中率极低（实测小样本库里电影的相似项恒为 0 条，"类似影片"整栏消失）。改为逐级放宽——同类型+同流派+相近年份 → +同流派 → +相近年份 → 仅同类型——并逐级去重累积到 `Limit` 为止，相关度高的排在前面。
+- 列表端点现在认 `?Filters=IsFavorite`（`/emby/Persons`、`/emby/Genres`、`/emby/Studios`）。官方客户端「喜欢」页的人物栏打的是 `apiClient.getPeople`（即 `/emby/Persons`），而不是 `/emby/Items`，并带上 `Filters=IsFavorite`；此前完全忽略这个参数，于是库里每个人物都被当成"已收藏"——没收藏过任何人也会长出一整栏"喜欢的人物"（小雅测试库 312 条）。收藏状态仍以 `play_progress.is_favorite` 为准，收藏某个人物后会正常出现在该栏。
 
 ### 部署与升级须知
 
