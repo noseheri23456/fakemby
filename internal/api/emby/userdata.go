@@ -25,12 +25,21 @@ func RegisterUserDataRoutes(router *gin.Engine, cfg *config.Config) {
 
 	// 取消已看
 	router.DELETE("/emby/Users/:userId/PlayedItems/:itemId", auth, owner, unmarkAsPlayed(playSvc, mediaSvc))
+	// 同上，但走 4.7.0.33 引入的 POST + "/Delete" 形式。
+	router.POST("/emby/Users/:userId/PlayedItems/:itemId/Delete", auth, owner, unmarkAsPlayed(playSvc, mediaSvc))
 
 	// 收藏
 	router.POST("/emby/Users/:userId/FavoriteItems/:itemId", auth, owner, markAsFavorite(playSvc, mediaSvc))
 
 	// 取消收藏
 	router.DELETE("/emby/Users/:userId/FavoriteItems/:itemId", auth, owner, unmarkAsFavorite(playSvc, mediaSvc))
+	// 同上，但走 4.7.0.33 引入的 POST + "/Delete" 形式。
+	//
+	// 官方客户端 apiclient.js 里有 `this._enablePostForDelete = this.isMinServerVersion("4.7.0.33")`，
+	// 一旦成立，"取消收藏 / 取消已看"就改用 POST .../Delete 而不是 DELETE。
+	// 我们对外声明 4.8.0.0，这个分支必然命中；只注册 DELETE 的话客户端取消收藏
+	// 一定拿到 404 —— 表现为"能加喜欢，不能取消喜欢"。
+	router.POST("/emby/Users/:userId/FavoriteItems/:itemId/Delete", auth, owner, unmarkAsFavorite(playSvc, mediaSvc))
 
 	// 继续观看列表
 	router.GET("/emby/Users/:userId/Items/Resume", auth, owner, getResumeItems(playSvc, mediaSvc))

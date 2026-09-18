@@ -251,6 +251,79 @@ func TestFavoriteRoundTrip(t *testing.T) {
 	assert.Equal(t, false, detail.JSON(t)["UserData"].(map[string]any)["IsFavorite"])
 }
 
+// TestUnmarkViaPostDeleteAlias 钉死 4.7.0.33+ 的 "POST + /Delete" 取消形式。
+//
+// 官方客户端 apiclient.js 有 `this._enablePostForDelete = this.isMinServerVersion("4.7.0.33")`，
+// 一旦成立，"取消收藏 / 取消已看"就不再发 DELETE，而是 POST .../Delete。
+// 我们对外声明 4.8.0.0，这个分支必然命中；只注册 DELETE 的话客户端取消收藏
+// 一定拿到 404 —— 表现为"能加喜欢，不能取消喜欢"。
+func TestUnmarkViaPostDeleteAlias(t *testing.T) {
+	a, env := newAPI(t)
+	if !versionAtLeast(env.Cfg.Server.Version, "4.7.0.33") {
+		t.Skipf("对外声明的版本 %s < 4.7.0.33，客户端不会走 POST /Delete 形式", env.Cfg.Server.Version)
+	}
+
+	base := "/emby/Users/" + testutil.OtherUserID
+
+	// 取消收藏：POST .../FavoriteItems/{id}/Delete
+	fav := a.post(base+"/FavoriteItems/"+testutil.SeriesID, testutil.OtherToken, nil)
+	require.Equal(t, http.StatusOK, fav.Status)
+	require.Equal(t, true, fav.JSON(t)["IsFavorite"])
+
+	unfav := a.post(base+"/FavoriteItems/"+testutil.SeriesID+"/Delete", testutil.OtherToken, nil)
+	require.Equal(t, http.StatusOK, unfav.Status, "POST .../FavoriteItems/{id}/Delete 必须可用（客户端取消收藏打的就是它）")
+	assert.Equal(t, false, unfav.JSON(t)["IsFavorite"])
+
+	detail := a.get(base+"/Items/"+testutil.SeriesID, testutil.OtherToken)
+	assert.Equal(t, false, detail.JSON(t)["UserData"].(map[string]any)["IsFavorite"])
+
+	// 取消已看：POST .../PlayedItems/{id}/Delete
+	played := a.post(base+"/PlayedItems/"+testutil.SeriesID, testutil.OtherToken, nil)
+	require.Equal(t, http.StatusOK, played.Status)
+	require.Equal(t, true, played.JSON(t)["Played"])
+
+	unplayed := a.post(base+"/PlayedItems/"+testutil.SeriesID+"/Delete", testutil.OtherToken, nil)
+	require.Equal(t, http.StatusOK, unplayed.Status, "POST .../PlayedItems/{id}/Delete 必须可用")
+	assert.Equal(t, false, unplayed.JSON(t)["Played"])
+}
+
+// versionAtLeast 按点分数字段逐个比较版本字符串，忽略非数字后缀。
+func versionAtLeast(version, min string) bool {
+	parse := func(s string) []int {
+		out := []int{}
+		cur := 0
+		has := false
+		for _, r := range s {
+			if r >= '0' && r <= '9' {
+				cur = cur*10 + int(r-'0')
+				has = true
+				continue
+			}
+			if r == '.' {
+				out = append(out, cur)
+				cur, has = 0, false
+				continue
+			}
+			break
+		}
+		if has {
+			out = append(out, cur)
+		}
+		return out
+	}
+	a, b := parse(version), parse(min)
+	for i := 0; i < len(b); i++ {
+		x := 0
+		if i < len(a) {
+			x = a[i]
+		}
+		if x != b[i] {
+			return x > b[i]
+		}
+	}
+	return true
+}
+
 func TestPlaybackInfoAndStreamRedirect(t *testing.T) {
 	a, _ := newAPI(t)
 
