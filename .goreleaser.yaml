@@ -11,9 +11,15 @@ builds:
       - CGO_ENABLED=0
     goos:
       - linux
+      - windows
+      - darwin
     goarch:
       - amd64
       - arm64
+    # Windows on ARM 没有可用的目标机器，不产出无人验证的产物。
+    ignore:
+      - goos: windows
+        goarch: arm64
     flags:
       - -mod=readonly
       - -trimpath
@@ -23,6 +29,12 @@ builds:
 archives:
   - id: fakemby
     formats: [tar.gz]
+    # tar.gz 在 Windows 上体验很差，桌面平台统一换成 zip。
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+      - goos: darwin
+        formats: [zip]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md

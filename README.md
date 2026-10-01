@@ -121,7 +121,9 @@ helm install fakemby deploy/helm/fakemby --namespace fakemby
 
 ### 发布与镜像
 
-GoReleaser v2 产出 Linux amd64/arm64 归档（含 SHA-256 校验和）；打 tag 后向 `ghcr.io/<owner>/<repo>` 推送多平台镜像。语义化版本与 CHANGELOG 约定见 [CHANGELOG.md](CHANGELOG.md)。
+打 tag 后 Release 工作流会自动：① 用 GoReleaser v2 产出 **Linux / Windows / macOS** 二进制归档（Linux 为 `tar.gz`，桌面平台为 `zip`，含 SHA-256 校验和），并把同版本 Helm chart 作为附件一起发布；② 向 `ghcr.io/<owner>/<repo>` 推送 linux amd64/arm64 多平台镜像（预发布不移动 `latest`）。语义化版本与 CHANGELOG 约定见 [CHANGELOG.md](CHANGELOG.md)。
+
+从 Release 页面下载时按平台挑选（`linux_amd64` / `windows_amd64` / `darwin_amd64` / `darwin_arm64`），解压后直接运行即可，无需 Go 环境。Windows 下产物为 `fakemby.exe`。
 
 ## 管理 API
 

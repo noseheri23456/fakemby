@@ -4,7 +4,8 @@
 
 ### 新增
 
-- M4-3：用 GoReleaser v2 产出 Linux amd64/arm64 发布归档（含 SHA-256 校验和），并把带版本号的 Helm chart 作为 GitHub Release 附件一并发布。
+- M4-3：用 GoReleaser v2 产出 Linux / Windows / macOS 发布归档（Linux 为 `tar.gz`，Windows 与 macOS 为 `zip`，含 SHA-256 校验和），并把带版本号的 Helm chart 作为 GitHub Release 附件一并发布。
+- M4-3：桌面端构建矩阵 —— 新增 `windows/amd64`、`darwin/amd64`、`darwin/arm64` 产物（Windows on ARM 不产出）。Docker 镜像仍是 linux amd64/arm64 双架构。
 - M4-3：由 tag 触发的发布工作流会构建并向 `ghcr.io/<repository-owner>/<repository-name>` 推送多平台镜像。发布前校验 Go 测试、GoReleaser 配置、Compose 与 Helm；影响发布资产的 Pull Request 与手动运行只做校验。
 - M4-4：极简 Helm chart —— Service、保留的 SQLite PVC（或既有 claim）、引用既有 Secret、可选的配置 ConfigMap、启动/就绪/存活探针，以及受限的 pod/容器安全上下文。
 - Emby API 兼容：新增 `GET/HEAD /emby/Videos/{id}/original`（可带容器后缀）与 `/emby/Videos/{id}/stream` 的 HEAD 支持，偏好 `original` 的客户端（多数 2025 年一代的播放器）能直接起播，不再收到 404/405。
