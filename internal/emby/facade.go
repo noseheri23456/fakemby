@@ -5,22 +5,25 @@ package emby
 import (
 	admin "github.com/fakemby/fakemby/internal/api/admin"
 	api "github.com/fakemby/fakemby/internal/api/emby"
+	"github.com/fakemby/fakemby/internal/types"
 )
 
-var DefaultUserConfig = api.DefaultUserConfig
+// DTO 已迁到 internal/types（2026-10-03 审查 P3-8）；这里只做转发，
+// 保持旧包路径继续可用。
+var DefaultUserConfig = types.DefaultUserConfig
 var GetUserPolicy = api.GetUserPolicy
 var RegisterAuthRoutes = api.RegisterAuthRoutes
 var AuthTokenMiddleware = api.AuthTokenMiddleware
 
-type AuthenticateRequest = api.AuthenticateRequest
-type AuthenticateResponse = api.AuthenticateResponse
-type UserDTO = api.UserDTO
-type UserPolicy = api.UserPolicy
-type UserConfig = api.UserConfig
-type SessionInfo = api.SessionInfo
-type PlayState = api.PlayState
-type Capabilities = api.Capabilities
-type PublicUserDTO = api.PublicUserDTO
+type AuthenticateRequest = types.AuthenticateRequest
+type AuthenticateResponse = types.AuthenticateResponse
+type UserDTO = types.UserDTO
+type UserPolicy = types.UserPolicy
+type UserConfig = types.UserConfig
+type SessionInfo = types.SessionInfo
+type PlayState = types.PlayState
+type Capabilities = types.Capabilities
+type PublicUserDTO = types.PublicUserDTO
 
 var RequireUserMatch = api.RequireUserMatch
 var RegisterCompatRoutes = api.RegisterCompatRoutes
@@ -57,7 +60,7 @@ var BufferProgress = api.BufferProgress
 var ShutdownProgressBuffer = api.ShutdownProgressBuffer
 var RegisterSessionRoutes = api.RegisterSessionRoutes
 
-type NowPlayingItem = api.NowPlayingItem
+type NowPlayingItem = types.NowPlayingItem
 type PlayingRequest = api.PlayingRequest
 type StoppedRequest = api.StoppedRequest
 type ProgressRequest = api.ProgressRequest

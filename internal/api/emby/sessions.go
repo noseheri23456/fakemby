@@ -4,6 +4,7 @@ import (
 	"github.com/fakemby/fakemby/internal/access"
 	"github.com/fakemby/fakemby/internal/config"
 	"github.com/fakemby/fakemby/internal/database"
+	"github.com/fakemby/fakemby/internal/types"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -14,13 +15,8 @@ import (
 )
 
 var activeSessionsMu sync.RWMutex
-var activeSessions = make(map[string]*SessionInfo)
+var activeSessions = make(map[string]*types.SessionInfo)
 
-type NowPlayingItem struct {
-	Id   string `json:"Id"`
-	Name string `json:"Name"`
-	Type string `json:"Type"`
-}
 type PlayingRequest struct {
 	ItemId        string  `json:"ItemId" binding:"required"`
 	MediaSourceId string  `json:"MediaSourceId"`
@@ -149,7 +145,7 @@ func RegisterSessionRoutes(r *gin.Engine, cfg *config.Config) {
 func getSessions() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		activeSessionsMu.RLock()
-		out := []SessionInfo{}
+		out := []types.SessionInfo{}
 		for _, s := range activeSessions {
 			out = append(out, *s)
 		}
@@ -160,7 +156,7 @@ func getSessions() gin.HandlerFunc {
 
 // userSessions 返回某用户的活动会话快照。
 // 恒返回非 nil 切片——websocket 与 HTTP 两条链路共用，客户端会直接 `.filter`/`.length`。
-func userSessions(userID string) []SessionInfo {
+func userSessions(userID string) []types.SessionInfo {
 	activeSessionsMu.RLock()
 	defer activeSessionsMu.RUnlock()
 	return sessionsOfLocked(userID)
@@ -168,8 +164,8 @@ func userSessions(userID string) []SessionInfo {
 
 // sessionsOfLocked 在调用方已持有 activeSessionsMu（读或写）时使用。
 // 播放上报全程持有写锁，此时绝不能再调 userSessions，否则自死锁。
-func sessionsOfLocked(userID string) []SessionInfo {
-	out := []SessionInfo{}
+func sessionsOfLocked(userID string) []types.SessionInfo {
+	out := []types.SessionInfo{}
 	for _, s := range activeSessions {
 		if s.UserId == userID {
 			out = append(out, *s)
@@ -302,18 +298,18 @@ func recordPlayback(stopped bool) gin.HandlerFunc {
 			delete(activeSessions, sid)
 		} else {
 			// 数组字段一律初始化为空切片：客户端会裸调 `.includes`/`.length`（见 ROADMAP §10）。
-			activeSessions[sid] = &SessionInfo{
+			activeSessions[sid] = &types.SessionInfo{
 				Id: sid, UserId: userID, UserName: user.Name,
 				LastActivityDate: now.Format(time.RFC3339), RemoteEndPoint: c.ClientIP(),
-				AdditionalUsers:    []UserDTO{},
+				AdditionalUsers:    []types.UserDTO{},
 				PlayableMediaTypes: []string{},
 				SupportedCommands:  []string{},
-				Capabilities: Capabilities{
+				Capabilities: types.Capabilities{
 					PlayableMediaTypes: []string{},
 					SupportedCommands:  []string{},
 				},
-				NowPlayingItem: &NowPlayingItem{item.ID, item.Name, item.Type},
-				PlayState:      PlayState{PositionTicks: &req.PositionTicks, IsPaused: req.IsPaused},
+				NowPlayingItem: &types.NowPlayingItem{Id: item.ID, Name: item.Name, Type: item.Type},
+				PlayState:      types.PlayState{PositionTicks: &req.PositionTicks, IsPaused: req.IsPaused},
 			}
 		}
 		eventHub.Broadcast(userID, "UserDataChanged", gin.H{"UserId": userID, "UserDataList": []gin.H{{"ItemId": item.ID, "PlaybackPositionTicks": req.PositionTicks}}})

@@ -46,6 +46,9 @@
 - `NextUp` 只读取该用户"已看过"的进度 ID，不再把全部进度行拉进内存只为建一个 bool map。
 - Token 过期清理 goroutine 现在可停止（`database.Close()` 会先停它），避免句柄关闭后再触发一次清理时解引用 nil。
 - 登录失败限流器的记录表加了容量上界：达到阈值会清扫已过期的记录，用海量随机用户名灌失败记录不再让内存无上限增长。
+- `internal/api/emby/auth.go`（795 行，DTO + handler + 认证材料提取三种职责混在一起）拆成三处：用户/会话 DTO 迁到 `internal/types/user.go`；token 提取、`AuthTokenMiddleware` 与 Basic Auth 凭据缓存迁到 `internal/api/emby/token.go`；`auth.go` 只留登录/登出/取当前用户三个 handler 与 `GetUserPolicy`（DB 模型 → DTO 映射）。旧包路径 `internal/emby` 的转发别名保持不变。
+- `UserDTO` 的构造收敛到单一入口 `newUserDTO`。此前 `Users/Me`、`Users/{id}`、`Users`、`Users/Query`、`Users/New` 各写一份字面量，其中三份漏了 `ServerId`——客户端用 `item.ServerId` 反查 apiClient，缺失会让后续调用拿到 undefined。现在这些端点都带 `ServerId`，`Users/New` 也不再在 handler 里取全局配置。
+- 迁到 `internal/types` 的 `UserPolicy` / `UserConfig` / `SessionInfo` / `Capabilities` 补了与 `BaseItemDto` 同一套的序列化总闸：数组字段零值一律输出 `[]`。此前只靠"构造点记得初始化"，漏一处就是客户端首页永久转圈。`MaxParentalRating` 的 `null`（表示不限制）保持原语义不变。
 - 容器内文件日志重定向到 `/dev/null`；应用日志仍写 stderr。数据库与图片缓存仍写在 `/app/data` 下。
 - 探针改为对既有的 `/emby/System/Info/Public` 路由发 GET。它们检查的是 HTTP 是否响应，不是数据库是否就绪；这些部署变更没有新增健康检查端点。
 

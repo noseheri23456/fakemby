@@ -10,6 +10,7 @@ import (
 	"github.com/fakemby/fakemby/internal/config"
 	"github.com/fakemby/fakemby/internal/database"
 	"github.com/fakemby/fakemby/internal/service"
+	"github.com/fakemby/fakemby/internal/types"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -22,15 +23,15 @@ func RegisterUserRoutes(router *gin.Engine, cfg *config.Config) {
 	owner := RequireUserMatch("userId")
 
 	// Users Core
-	router.POST("/emby/Users/New", auth, RequireAdmin(), createUserCore())
+	router.POST("/emby/Users/New", auth, RequireAdmin(), createUserCore(cfg))
 	router.POST("/emby/Users/:userId/Password", auth, RequireAdmin(), setUserPassword())
 	router.POST("/emby/Users/:userId/Policy", auth, RequireAdmin(), setUserPolicy())
 	router.DELETE("/emby/Users/:userId", auth, RequireAdmin(), deleteUserCore())
 
 	// Query and List
-	router.GET("/emby/Users", auth, getAllUsers())
-	router.GET("/emby/Users/Query", auth, queryUsers())
-	router.GET("/emby/Users/:userId", auth, owner, getUser(authSvc))
+	router.GET("/emby/Users", auth, getAllUsers(cfg))
+	router.GET("/emby/Users/Query", auth, queryUsers(cfg))
+	router.GET("/emby/Users/:userId", auth, owner, getUser(authSvc, cfg))
 
 	// Display Preferences (Task 4.5)
 	router.GET("/emby/DisplayPreferences/usersettings", auth, func(c *gin.Context) {
@@ -57,7 +58,7 @@ func RequireAdmin() gin.HandlerFunc {
 }
 
 // POST /emby/Users/New
-func createUserCore() gin.HandlerFunc {
+func createUserCore(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
 			Name string `json:"Name"`
@@ -88,18 +89,7 @@ func createUserCore() gin.HandlerFunc {
 			return
 		}
 
-		resp := UserDTO{
-			ID:                        user.ID,
-			Name:                      user.Name,
-			ServerID:                  config.Get().Server.ID,
-			HasPassword:               false,
-			HasConfiguredPassword:     false,
-			HasConfiguredEasyPassword: false,
-			IsAdmin:                   user.IsAdmin,
-			Policy:                    GetUserPolicy(user),
-		}
-
-		c.JSON(http.StatusOK, resp)
+		c.JSON(http.StatusOK, newUserDTO(user, cfg.Server.ID))
 	}
 }
 
@@ -149,7 +139,7 @@ func setUserPassword() gin.HandlerFunc {
 func setUserPolicy() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.Param("userId")
-		var policy UserPolicy
+		var policy types.UserPolicy
 		if err := c.BindJSON(&policy); err != nil {
 			c.JSON(http.StatusBadRequest, ErrBadRequest)
 			return
@@ -228,7 +218,7 @@ func deleteUserCore() gin.HandlerFunc {
 }
 
 // GET /emby/Users
-func getAllUsers() gin.HandlerFunc {
+func getAllUsers(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var users []database.User
 		if err := database.Get().Find(&users).Error; err != nil {
@@ -237,18 +227,9 @@ func getAllUsers() gin.HandlerFunc {
 			return
 		}
 
-		userDTOs := make([]UserDTO, 0, len(users))
+		userDTOs := make([]types.UserDTO, 0, len(users))
 		for _, u := range users {
-			userDTOs = append(userDTOs, UserDTO{
-				ID:                        u.ID,
-				Name:                      u.Name,
-				HasPassword:               u.PasswordHash != "",
-				HasConfiguredPassword:     u.PasswordHash != "",
-				HasConfiguredEasyPassword: false,
-				IsAdmin:                   u.IsAdmin,
-				Policy:                    GetUserPolicy(&u),
-				Configuration:             DefaultUserConfig(),
-			})
+			userDTOs = append(userDTOs, newUserDTO(&u, cfg.Server.ID))
 		}
 
 		c.JSON(http.StatusOK, userDTOs)
@@ -256,7 +237,7 @@ func getAllUsers() gin.HandlerFunc {
 }
 
 // GET /emby/Users/Query
-func queryUsers() gin.HandlerFunc {
+func queryUsers(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		namePrefix := c.Query("NameStartsWithOrGreater")
 
@@ -272,18 +253,9 @@ func queryUsers() gin.HandlerFunc {
 			return
 		}
 
-		userDTOs := make([]UserDTO, 0, len(users))
+		userDTOs := make([]types.UserDTO, 0, len(users))
 		for _, u := range users {
-			userDTOs = append(userDTOs, UserDTO{
-				ID:                        u.ID,
-				Name:                      u.Name,
-				HasPassword:               u.PasswordHash != "",
-				HasConfiguredPassword:     u.PasswordHash != "",
-				HasConfiguredEasyPassword: false,
-				IsAdmin:                   u.IsAdmin,
-				Policy:                    GetUserPolicy(&u),
-				Configuration:             DefaultUserConfig(),
-			})
+			userDTOs = append(userDTOs, newUserDTO(&u, cfg.Server.ID))
 		}
 
 		c.JSON(http.StatusOK, gin.H{
@@ -293,7 +265,7 @@ func queryUsers() gin.HandlerFunc {
 	}
 }
 
-func getUser(authSvc *service.AuthService) gin.HandlerFunc {
+func getUser(authSvc *service.AuthService, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.Param("userId")
 
@@ -308,17 +280,6 @@ func getUser(authSvc *service.AuthService) gin.HandlerFunc {
 			return
 		}
 
-		userDTO := UserDTO{
-			ID:                        user.ID,
-			Name:                      user.Name,
-			HasPassword:               user.PasswordHash != "",
-			HasConfiguredPassword:     user.PasswordHash != "",
-			HasConfiguredEasyPassword: false,
-			IsAdmin:                   user.IsAdmin,
-			Policy:                    GetUserPolicy(user),
-			Configuration:             DefaultUserConfig(),
-		}
-
-		c.JSON(http.StatusOK, userDTO)
+		c.JSON(http.StatusOK, newUserDTO(user, cfg.Server.ID))
 	}
 }
