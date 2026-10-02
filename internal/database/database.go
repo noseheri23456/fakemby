@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -202,6 +203,8 @@ func Set(d *gorm.DB) {
 }
 
 func Close() error {
+	// 先停清理 goroutine，再关句柄：否则它可能拿着已经关闭的 db 去删 token。
+	StopTokenCleanupRoutine()
 	if db == nil {
 		return nil
 	}
@@ -221,24 +224,57 @@ func Close() error {
 	return err
 }
 
-// StartTokenCleanupRoutine 启动令牌过期清理 goroutine
+var (
+	tokenCleanupMu   sync.Mutex
+	tokenCleanupStop chan struct{}
+)
+
+// StartTokenCleanupRoutine 启动令牌过期清理 goroutine。
+// 配套的 StopTokenCleanupRoutine（Close 里会调）负责停掉它：
+// 否则 Close() 之后 ticker 再触发一次，cleanExpiredTokens 就会对已置 nil 的 db
+// 解引用直接 panic。窗口只有一小时，但值得堵。
 func StartTokenCleanupRoutine(expiryDays int) {
+	stop := make(chan struct{})
+	tokenCleanupMu.Lock()
+	tokenCleanupStop = stop
+	tokenCleanupMu.Unlock()
+
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
 
-		for range ticker.C {
-			cleanExpiredTokens(expiryDays)
+		for {
+			select {
+			case <-ticker.C:
+				cleanExpiredTokens(expiryDays)
+			case <-stop:
+				return
+			}
 		}
 	}()
 
 	slog.Info("✓ Token 过期清理 goroutine 启动", "interval", "1h", "expiry_days", expiryDays)
 }
 
+// StopTokenCleanupRoutine 停止令牌清理 goroutine，可重复调用。
+func StopTokenCleanupRoutine() {
+	tokenCleanupMu.Lock()
+	stop := tokenCleanupStop
+	tokenCleanupStop = nil
+	tokenCleanupMu.Unlock()
+	if stop != nil {
+		close(stop)
+	}
+}
+
 func cleanExpiredTokens(expiryDays int) {
+	current := Get()
+	if current == nil {
+		return
+	}
 	cutoffTime := time.Now().AddDate(0, 0, -expiryDays)
 
-	if err := db.Where("created_at < ?", cutoffTime).Delete(&Token{}).Error; err != nil {
+	if err := current.Where("created_at < ?", cutoffTime).Delete(&Token{}).Error; err != nil {
 		slog.Error("清理过期 Token 失败", "error", err)
 		return
 	}

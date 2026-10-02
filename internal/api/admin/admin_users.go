@@ -65,7 +65,7 @@ func changeUserPassword() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req ChangePasswordRequest
 		if err := decodeAdminJSON(c, &req, 64<<10); err != nil || !validAdminPassword(req.Password) {
-			c.JSON(http.StatusBadRequest, gin.H{"Message": "password must contain 1-72 bytes"})
+			c.JSON(http.StatusBadRequest, gin.H{"Message": "password must be 8-72 bytes"})
 			return
 		}
 		hash, err := database.HashPassword(req.Password)
@@ -87,8 +87,12 @@ func changeUserPassword() gin.HandlerFunc {
 	}
 }
 
+// validAdminPassword 与自助改密（service.AuthService.ChangePassword）保持同一策略：
+// 8-72 字节。此前管理面只要求"非空"，允许 1 字节口令，与改密端点的 8 字节下限不一致，
+// 管理员建立的弱口令账户在改密前一直是裸奔的。
+// 上限 72 是 bcrypt 的硬限制：超出的部分会被静默截断，必须显式拒绝而不是悄悄截。
 func validAdminPassword(password string) bool {
-	return strings.TrimSpace(password) != "" && len(password) <= 72
+	return len(password) >= 8 && len(password) <= 72
 }
 
 func adminUserResponse(user database.User) UserResponse {
@@ -126,7 +130,7 @@ func createUser() gin.HandlerFunc {
 		}
 		req.Name = strings.TrimSpace(req.Name)
 		if req.Name == "" || len(req.Name) > 256 || !validAdminPassword(req.Password) {
-			c.JSON(http.StatusBadRequest, gin.H{"Message": "name (1-256 bytes) and password (1-72 bytes) are required"})
+			c.JSON(http.StatusBadRequest, gin.H{"Message": "name (1-256 bytes) and password (8-72 bytes) are required"})
 			return
 		}
 		hash, err := database.HashPassword(req.Password)

@@ -9,6 +9,7 @@ import (
 	"github.com/fakemby/fakemby/internal/config"
 	"github.com/fakemby/fakemby/internal/database"
 	"github.com/fakemby/fakemby/internal/infra/signer"
+	"github.com/fakemby/fakemby/internal/infra/source"
 	"github.com/fakemby/fakemby/internal/service"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -57,7 +58,11 @@ func RegisterImageRoutes(router *gin.Engine, cfg *config.Config) {
 	router.HEAD("/emby/Items/:itemId/Images/:imageType/:index", imgAuth, getItemImageByIndex(imgSvc, mediaSvc, cfg))
 
 	// 用户头像
-	router.GET("/emby/Users/:userId/Images/:imageType", getUserImage(imgSvc, cfg))
+	//
+	// 这里必须和媒体图片挂同一个 imgAuth：此前它是唯一裸注册的图片端点，
+	// 管理员把 image.require_auth 打开收紧图片面时，这条路径仍然匿名可达，
+	// 并且会 302 泄漏 user.ImageURL —— 安全面不一致比"少一个开关"更难发现。
+	router.GET("/emby/Users/:userId/Images/:imageType", imgAuth, getUserImage(imgSvc, cfg))
 }
 
 func getItemImage(imgSvc *service.ImageService, mediaSvc *service.MediaService, cfg *config.Config) gin.HandlerFunc {
@@ -156,12 +161,15 @@ func isLocalFilePath(s string) bool {
 	return !strings.HasPrefix(s, "http://") && !strings.HasPrefix(s, "https://")
 }
 
+// getUserImage 返回用户头像。
+//
+// 用户没有单独的图片表，头像地址存在 users.image_url（只有管理员能写）。
+// 两种图片模式下都走 302：proxy_cache 只对媒体图做了本地缓存，
+// 头像量小且通常是外链，先保持与 redirect 模式一致的行为（原先两个分支代码相同）。
 func getUserImage(imgSvc *service.ImageService, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.Param("userId")
 
-		// 获取用户头像
-		// 用户没有单独的图片表，可以从用户表的 image_url 字段获取
 		var user database.User
 		if err := database.Get().Where("id = ?", userID).First(&user).Error; err != nil {
 			c.JSON(http.StatusNotFound, ErrNotFound)
@@ -169,18 +177,20 @@ func getUserImage(imgSvc *service.ImageService, cfg *config.Config) gin.HandlerF
 		}
 
 		if user.ImageURL == "" {
-			// 返回默认头像或 404
 			c.JSON(http.StatusNotFound, ErrNotFound)
 			return
 		}
 
-		// 根据模式处理
-		if cfg.Image.Mode == "proxy_cache" {
-			// TODO: 实现用户头像缓存逻辑
-			c.Redirect(http.StatusFound, user.ImageURL)
-		} else {
-			c.Redirect(http.StatusFound, user.ImageURL)
+		// 与导入侧的 validateImportURL 同一标准：只接受无嵌入凭据的绝对 http(s)。
+		// 不做校验的话，管理员误填 file:// / javascript: 之类的值会被原样 302 出去，
+		// 而调用方（客户端 <img> / 浏览器）会照着执行。
+		if err := source.ValidURL(user.ImageURL); err != nil {
+			slog.Warn("用户头像 URL 不合法，拒绝重定向", "user_id", userID, "error", err)
+			c.JSON(http.StatusNotFound, ErrNotFound)
+			return
 		}
+
+		c.Redirect(http.StatusFound, user.ImageURL)
 	}
 }
 

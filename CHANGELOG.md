@@ -38,6 +38,14 @@
 - Docker 构建改用 Go 1.26.3 与 BuildKit 目标平台参数，不再强制 amd64。运行时使用 UID/GID 10001，镜像只包含二进制与运行时依赖，不含仓库的配置或本地数据。
 - Compose 改为只读根文件系统、丢弃 capabilities、no-new-privileges、有界 tmpfs、轮转容器日志、持久命名卷，默认绑定回环地址；需要局域网/反代访问时显式设置 `FAKEMBY_BIND_ADDRESS`。
 - Compose 要求从 shell 或密钥管理器提供 `FAKEMBY_ADMIN_API_KEY` 与 `FAKEMBY_PLAYBACK_SIGN_KEY`，不再内置空值或占位凭据。同时删除部署示例中未使用的刮削器环境变量。
+- 管理面建用户与改密的口令下限统一为 8 字节（与自助改密 `ChangePassword` 一致），上限仍是 72 —— bcrypt 只取前 72 字节，超出会被静默截断。已有弱口令账户不受影响，但下次设置口令必须满足新下限。
+- 播放重定向（`streamVideo` / `downloadVideo` / `redirectSource`）不再在 handler 内部取全局配置，改为注册处注入；注入缺失时返回 500，而不是在测试 / 嵌入场景下直接 panic。
+- 图片缓存改为按目标文件细粒度加锁。此前一把全局互斥锁包住整个 fetch + resize + write，一张慢源站图（超时 20s）会挂起所有其他图片的缓存填充，客户端表现为整屏海报转圈；配额淘汰与 mtime 更新仍走全局锁。
+- HTTP Basic Auth 的口令校验结果加了 30 秒进程内缓存（key 是 HMAC-SHA256，进程随机密钥，不落明文；失败不缓存）。RodelPlayer 一类每个请求都发 Basic 的客户端不再每次付一次 bcrypt（约 100ms CPU）。缓存命中时仍回读用户并比对 `password_hash`，改密后旧凭据立刻失效。
+- `/emby/Users/{uid}/Items/Counts` 改为一条 `GROUP BY type` 统计，不再拉 10000 条进内存逐条数 —— 内存聚合在超大库下既慢又会因上限而计错。
+- `NextUp` 只读取该用户"已看过"的进度 ID，不再把全部进度行拉进内存只为建一个 bool map。
+- Token 过期清理 goroutine 现在可停止（`database.Close()` 会先停它），避免句柄关闭后再触发一次清理时解引用 nil。
+- 登录失败限流器的记录表加了容量上界：达到阈值会清扫已过期的记录，用海量随机用户名灌失败记录不再让内存无上限增长。
 - 容器内文件日志重定向到 `/dev/null`；应用日志仍写 stderr。数据库与图片缓存仍写在 `/app/data` 下。
 - 探针改为对既有的 `/emby/System/Info/Public` 路由发 GET。它们检查的是 HTTP 是否响应，不是数据库是否就绪；这些部署变更没有新增健康检查端点。
 
@@ -68,6 +76,10 @@
 - 相似条目不再因为条件过严而返回空集。`FindSimilarItems` 原先同时要求"同类型 + 同流派 + 年份 ±3"，三者一起收紧时命中率极低（实测小样本库里电影的相似项恒为 0 条，"类似影片"整栏消失）。改为逐级放宽——同类型+同流派+相近年份 → +同流派 → +相近年份 → 仅同类型——并逐级去重累积到 `Limit` 为止，相关度高的排在前面。
 - 列表端点现在认 `?Filters=IsFavorite`（`/emby/Persons`、`/emby/Genres`、`/emby/Studios`）。官方客户端「喜欢」页的人物栏打的是 `apiClient.getPeople`（即 `/emby/Persons`），而不是 `/emby/Items`，并带上 `Filters=IsFavorite`；此前完全忽略这个参数，于是库里每个人物都被当成"已收藏"——没收藏过任何人也会长出一整栏"喜欢的人物"（小雅测试库 312 条）。收藏状态仍以 `play_progress.is_favorite` 为准，收藏某个人物后会正常出现在该栏。
 - Emby API 兼容：新增 `POST /emby/Users/{uid}/FavoriteItems/{id}/Delete` 与 `POST /emby/Users/{uid}/PlayedItems/{id}/Delete`。官方客户端 `apiclient.js` 里有 `this._enablePostForDelete = this.isMinServerVersion("4.7.0.33")`，我们对外声明 4.8.0.0，因此"取消收藏 / 取消已看"走的是这个 POST + `/Delete` 形式，而不是 DELETE。此前只注册了 DELETE，客户端取消收藏必然收到 404 —— 表现为"能加喜欢，不能取消喜欢"。两种形式现在都可用。
+- `/emby/Items/Resume`（不带用户 ID 的变体）此前用了一段手写 SQL，列名写错 —— 模型里是 `is_played` / `last_played`，SQL 里写成 `played` / `updated_at`，而 `Find` 返回的错误被丢弃，于是端点恒返回空列表且完全不报错，依赖它的客户端"继续观看"一直是空的。现在与 `/emby/Users/{uid}/Items/Resume` 共用同一实现。
+- 用户头像端点 `/emby/Users/{uid}/Images/{type}` 此前是唯一裸注册的图片端点：`image.require_auth = true` 收紧图片面时它仍匿名可达，并会 302 泄漏头像地址。现在挂同一个 `imgAuth`，且地址必须是无嵌入凭据的绝对 http(s)（与导入侧的校验同一标准），否则返回 404 而不是原样重定向。
+- `PlaybackInfo` 的音频流语言不再写死 `en`，改为取导入数据里 `Languages` 的第一项；取不到就留空，让客户端走自己的默认。
+- 媒体库与文件夹的 `Etag` 改为由 ID 推导的稳定值。此前用 `time.Now().UnixNano()`，每次请求都变，客户端的 `If-None-Match` 永远命中不了 304。
 
 ### 部署与升级须知
 

@@ -56,26 +56,81 @@ func (s *ImageService) GetImage(itemID string, imageType string, index int, maxW
 	return image.URL, nil
 }
 
-// getImageFromCache 代理缓存模式：缓存到本地
-var imageCacheMu sync.Mutex
-var imageClient = &http.Client{Timeout: 20 * time.Second}
+// getImageFromCache 代理缓存模式：缓存到本地。
+//
+// 抓源站这一步必须用**按 cachePath 细粒度**的锁，不能用一把全局锁包住整个
+// fetch + resize + write：一张慢源站图（超时 20s）会把所有其他图片的缓存填充
+// 一起挂住，客户端表现为整屏海报转圈。全局锁只留给配额淘汰和 LRU touch——
+// 它们要遍历/删除整个目录，必须独占。
+var (
+	imageQuotaMu  sync.Mutex // 保护配额淘汰与 mtime touch
+	imageInflight = keyedMutex{locks: make(map[string]*keyedLock)}
+	imageClient   = &http.Client{Timeout: 20 * time.Second}
+)
+
+// keyedMutex 按 key 分配互斥锁：同一张图的并发抓取串行化（只抓一次），
+// 不同图之间互不影响。引用计数归零即回收，避免锁表无上界增长。
+type keyedMutex struct {
+	mu    sync.Mutex
+	locks map[string]*keyedLock
+}
+
+type keyedLock struct {
+	mu   sync.Mutex
+	refs int
+}
+
+func (k *keyedMutex) Lock(key string) *keyedLock {
+	k.mu.Lock()
+	l := k.locks[key]
+	if l == nil {
+		l = &keyedLock{}
+		k.locks[key] = l
+	}
+	l.refs++
+	k.mu.Unlock()
+	l.mu.Lock()
+	return l
+}
+
+func (k *keyedMutex) Unlock(key string, l *keyedLock) {
+	l.mu.Unlock()
+	k.mu.Lock()
+	l.refs--
+	// 只有表里仍是同一把锁时才删：期间可能已经有新的等待者复用了它。
+	if l.refs <= 0 && k.locks[key] == l {
+		delete(k.locks, key)
+	}
+	k.mu.Unlock()
+}
 
 func (s *ImageService) getImageFromCache(img database.Image, maxWidth, maxHeight int) (string, error) {
 	if maxWidth < 0 || maxHeight < 0 || maxWidth > 8192 || maxHeight > 8192 {
 		return "", fmt.Errorf("invalid image dimensions")
 	}
-	imageCacheMu.Lock()
-	defer imageCacheMu.Unlock()
 	hash := md5.Sum([]byte(fmt.Sprintf("%s|%s|%d|%s|%dx%d", img.ItemID, img.Type, img.Idx, img.URL, maxWidth, maxHeight)))
 	cachePath := filepath.Join(s.cacheDir, fmt.Sprintf("%x.jpg", hash))
 	if err := os.MkdirAll(s.cacheDir, 0750); err != nil {
 		return "", err
 	}
+	// 命中缓存：touch mtime 维持 LRU 顺序。要拿配额锁，否则可能与淘汰并发删文件。
 	if info, err := os.Stat(cachePath); err == nil && info.Size() > 0 {
 		now := time.Now()
+		imageQuotaMu.Lock()
 		_ = os.Chtimes(cachePath, now, now)
+		imageQuotaMu.Unlock()
 		return cachePath, nil
 	}
+
+	// 同一张图的并发抓取串行化；不同图互不影响。
+	lock := imageInflight.Lock(cachePath)
+	defer imageInflight.Unlock(cachePath, lock)
+
+	// 双检：等锁期间这张图可能已经被别的请求填充好了。
+	if info, err := os.Stat(cachePath); err == nil && info.Size() > 0 {
+		return cachePath, nil
+	}
+
 	resp, err := imageClient.Get(img.URL)
 	if err != nil {
 		return "", err
@@ -141,7 +196,10 @@ func (s *ImageService) getImageFromCache(img database.Image, maxWidth, maxHeight
 		return "", err
 	}
 	if s.maxCacheBytes > 0 {
-		if err = s.enforceQuota(); err != nil {
+		imageQuotaMu.Lock()
+		err = s.enforceQuota()
+		imageQuotaMu.Unlock()
+		if err != nil {
 			return "", err
 		}
 	}
@@ -239,8 +297,8 @@ func (s *ImageService) CleanupExpiredCache(maxAgeDays int) error {
 	if s.mode != "proxy_cache" || maxAgeDays <= 0 {
 		return nil
 	}
-	imageCacheMu.Lock()
-	defer imageCacheMu.Unlock()
+	imageQuotaMu.Lock()
+	defer imageQuotaMu.Unlock()
 	cutoff := time.Now().AddDate(0, 0, -maxAgeDays)
 	return filepath.WalkDir(s.cacheDir, func(path string, d os.DirEntry, err error) error {
 		if os.IsNotExist(err) {

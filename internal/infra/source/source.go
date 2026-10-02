@@ -110,6 +110,10 @@ func (s STRM) Resolve(ctx context.Context, path string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	// 绝对路径是**有意放行**的：库里的 STRM 源可能存的是管理员配置的绝对路径，
+	// 强行拼到 root 下只会让这些条目全部失效。
+	// 但"允许绝对路径"不等于"允许逃出 root"——下面 EvalSymlinks 之后照样做 Rel 检查，
+	// 任何不在 root 内的目标（软链接指向也算）都会被拒绝，因此这不是一个越权口子。
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(root, path)
 	}

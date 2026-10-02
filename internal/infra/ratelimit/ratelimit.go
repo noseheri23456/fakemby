@@ -15,6 +15,11 @@ type entry struct {
 	firstSeen time.Time
 }
 
+// maxTrackedKeys 是 attempts 的软上限：达到即触发一次过期清扫。
+// 正常部署下永远不会触及（失败的 IP+用户名组合有限），只是为了给"随机用户名灌
+// 失败记录"这种攻击设一个上界——清扫后仍在窗口内的记录不会被删，功能不受影响。
+const maxTrackedKeys = 4096
+
 // Limiter 简单的失败计数器限流器（固定窗口：窗口过期后计数清零）。
 type Limiter struct {
 	mu          sync.Mutex
@@ -56,7 +61,22 @@ func (l *Limiter) RecordFailure(key string) bool {
 		l.attempts[key] = e
 	}
 	e.count++
+
+	// 顺手清理：只用随机用户名灌失败记录的话，IsLocked 永远不会碰到这些 key，
+	// map 就会无上界增长（每条 ~50B）。这里按容量触发一次全量清扫。
+	if len(l.attempts) > maxTrackedKeys {
+		l.sweepLocked(now)
+	}
 	return e.count >= l.maxAttempts
+}
+
+// sweepLocked 删除所有窗口已过期的记录。调用方必须持有 l.mu。
+func (l *Limiter) sweepLocked(now time.Time) {
+	for k, v := range l.attempts {
+		if now.Sub(v.firstSeen) > l.window {
+			delete(l.attempts, k)
+		}
+	}
 }
 
 // Reset 清除某 key 的失败记录（登录成功时调用，避免误伤正常用户）。

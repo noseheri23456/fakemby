@@ -1,11 +1,16 @@
 package emby
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/fakemby/fakemby/internal/config"
 	"github.com/fakemby/fakemby/internal/database"
@@ -190,6 +195,96 @@ func GetUserPolicy(u *database.User) UserPolicy {
 // loginLimiter 登录失败限流器（按 IP+用户名）。在 RegisterAuthRoutes 中按配置创建，
 // 包级变量便于 getTokenFromRequest 的 Basic Auth 分支复用同一把锁（A5）。
 var loginLimiter *ratelimit.Limiter
+
+// basicVerifyCache 缓存 HTTP Basic Auth 的「用户名 + 口令」校验结果。
+//
+// 动机：RodelPlayer 一类客户端每个请求都发一次 Authorization: Basic，而 bcrypt 是
+// 故意慢的（~100ms CPU/次）。不做缓存的话，合法流量也会把 CPU 吃满——限流器只挡
+// 失败尝试，挡不住「每次都带正确口令」的客户端。
+//
+// 缓存的是「这组凭据最近一次校验通过」，不是「这个用户可以放行」：
+//   - key 只存 HMAC-SHA256（进程随机密钥），不落明文口令；
+//   - 命中时仍回读用户并比对 PasswordHash —— 改密后旧凭据立刻失效；
+//   - 命中与否都要走调用方的 IsDisabled / MustChangePassword 复检。
+//
+// 因此最坏情况只是「改密或禁用后最多 30 秒内仍可能放行」，而这两项都由上面的
+// hash 比对 + 状态复检覆盖，实际窗口为零。
+const (
+	basicVerifyTTL     = 30 * time.Second
+	basicVerifyMaxKeys = 1024
+)
+
+// basicVerifyKey 进程随机密钥：即使有人拿到内存镜像，也无法对缓存 key 做彩虹表反查。
+var basicVerifyKey = func() []byte {
+	k := make([]byte, 32)
+	if _, err := rand.Read(k); err != nil {
+		return []byte("fakemby-basic-verify-cache")
+	}
+	return k
+}()
+
+type basicVerifyEntry struct {
+	userID string
+	hash   string // 缓存当时的 PasswordHash，用于识别改密
+	expiry time.Time
+}
+
+var basicVerifyCache = struct {
+	sync.Mutex
+	entries map[string]basicVerifyEntry
+}{entries: make(map[string]basicVerifyEntry)}
+
+func basicVerifyKeyFor(username, password string) string {
+	m := hmac.New(sha256.New, basicVerifyKey)
+	_, _ = m.Write([]byte(username))
+	_, _ = m.Write([]byte{0})
+	_, _ = m.Write([]byte(password))
+	return string(m.Sum(nil))
+}
+
+// verifyBasicCredentials 校验 Basic Auth 凭据，缓存命中时跳过 bcrypt。
+// 失败不缓存：攻击者的错误口令每次仍要付一次 bcrypt，配合 loginLimiter 生效。
+func verifyBasicCredentials(authSvc *service.AuthService, username, password string) (*database.User, bool) {
+	key := basicVerifyKeyFor(username, password)
+	now := time.Now()
+
+	basicVerifyCache.Lock()
+	e, ok := basicVerifyCache.entries[key]
+	if ok && !now.Before(e.expiry) {
+		delete(basicVerifyCache.entries, key)
+		ok = false
+	}
+	basicVerifyCache.Unlock()
+
+	if ok {
+		if u, err := authSvc.GetUserByID(e.userID); err == nil && u != nil && u.PasswordHash == e.hash {
+			return u, true
+		}
+		// 口令已变更或用户已删除：缓存失效，落到下面的完整校验
+	}
+
+	user, err := authSvc.VerifyPassword(username, password)
+	if err != nil || user == nil {
+		return nil, false
+	}
+
+	basicVerifyCache.Lock()
+	if len(basicVerifyCache.entries) >= basicVerifyMaxKeys {
+		for k, v := range basicVerifyCache.entries {
+			if !now.Before(v.expiry) {
+				delete(basicVerifyCache.entries, k)
+			}
+		}
+		if len(basicVerifyCache.entries) >= basicVerifyMaxKeys {
+			// 清完过期项仍是满的（全是活跃凭据）：整体丢弃。
+			// 宁可让后续请求多算几次 bcrypt，也不让这个 map 无上界增长。
+			basicVerifyCache.entries = make(map[string]basicVerifyEntry, basicVerifyMaxKeys)
+		}
+	}
+	basicVerifyCache.entries[key] = basicVerifyEntry{userID: user.ID, hash: user.PasswordHash, expiry: now.Add(basicVerifyTTL)}
+	basicVerifyCache.Unlock()
+	return user, true
+}
 
 func RegisterAuthRoutes(router *gin.Engine, cfg *config.Config) {
 	authSvc := service.NewAuthService(database.Get())
@@ -564,8 +659,10 @@ func getTokenFromRequest(c *gin.Context) string {
 					c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"StatusCode": 429, "Message": "Too many failed login attempts"})
 					return ""
 				}
-				user, err := authSvc.VerifyPassword(username, password)
-				if err != nil {
+				// 走凭据缓存：Basic Auth 客户端每个请求都会到这里，
+				// 每次都做 bcrypt 会把 CPU 吃满（详见 basicVerifyCache 注释）。
+				user, ok := verifyBasicCredentials(authSvc, username, password)
+				if !ok {
 					if loginLimiter != nil {
 						loginLimiter.RecordFailure(limitKey)
 					}

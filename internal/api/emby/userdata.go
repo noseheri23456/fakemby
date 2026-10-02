@@ -167,9 +167,16 @@ func getResumeItems(playSvc *service.PlaybackService, mediaSvc *service.MediaSer
 	return func(c *gin.Context) {
 		playSvc := service.NewPlaybackService(scopedMediaDB(c))
 		mediaSvc := scopedMediaService(c)
+		// 带 :userId 的路由由 RequireUserMatch 中间件完成归属校验（M0-5）；
+		// /emby/Items/Resume 这类无参变体复用同一实现时回落到 token 里的用户。
 		userID := c.Param("userId")
-
-		// 归属校验已由 RequireUserMatch 中间件完成（M0-5）
+		if userID == "" {
+			userID = c.GetString("user_id")
+		}
+		if userID == "" {
+			c.JSON(http.StatusUnauthorized, ErrUnauthorized)
+			return
+		}
 
 		// 解析参数
 		limitStr := c.DefaultQuery("Limit", "20")
@@ -186,16 +193,15 @@ func getResumeItems(playSvc *service.PlaybackService, mediaSvc *service.MediaSer
 			return
 		}
 
-		// 转换为 DTO
-		dtos := make([]interface{}, 0, len(items))
-		for _, item := range items {
-			dto := mediaSvc.ItemToDTO(&item, userID, nil)
-			dtos = append(dtos, dto)
+		// 转换为 DTO。用具体类型而不是 []interface{}：编译期就能挡住拼装错误。
+		dtos := make([]types.BaseItemDto, 0, len(items))
+		for i := range items {
+			dtos = append(dtos, *mediaSvc.ItemToDTO(&items[i], userID, nil))
 		}
 
-		resp := map[string]interface{}{
-			"Items":            dtos,
-			"TotalRecordCount": len(dtos),
+		resp := types.ItemsResponse{
+			Items:            dtos,
+			TotalRecordCount: len(dtos),
 		}
 
 		c.JSON(http.StatusOK, resp)

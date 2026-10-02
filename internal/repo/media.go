@@ -115,7 +115,10 @@ func (s *GormMedia) GetItems(userID string, parentID *string, recursive bool, it
 	}
 	if studioIds != "" {
 		for _, sid := range strings.Split(studioIds, ",") {
-			query = query.Where("studios LIKE ?", "%\""+strings.TrimSpace(sid)+"\"%") // Studios 目前存的是名字，不是 ID，如果客户端传 ID，我们需要适配。这里假设目前是 ID 匹配。
+			// studios 列存的是**名字**，不是 ID：上游 items.go 先把 ?StudioIds=
+			// 里的虚拟条目 ID 解析成名字再传进来（resolveVirtualNames），
+			// 所以这里就是名字匹配，不需要再做 ID→名字的适配。
+			query = query.Where("studios LIKE ?", "%\""+strings.TrimSpace(sid)+"\"%")
 		}
 	}
 

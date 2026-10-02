@@ -1,6 +1,7 @@
 package emby
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -23,7 +24,7 @@ func RegisterItemRoutes(router *gin.Engine, cfg *config.Config) {
 	itemsHandler := getItems(mediaSvc)
 	itemHandler := getItem(mediaSvc, cfg)
 	latestHandler := getLatest(mediaSvc)
-	countsHandler := getItemCounts(mediaSvc)
+	countsHandler := getItemCounts()
 	authMiddleware := AuthTokenMiddleware(cfg.Auth.TokenExpiryDays)
 	// M0-5：读侧归属校验，:userId 必须是本人或管理员
 	ownerMiddleware := RequireUserMatch("userId")
@@ -103,6 +104,14 @@ func getViews(mediaSvc *service.MediaService, cfg *config.Config) gin.HandlerFun
 	}
 }
 
+// stableEtag 由 ID 推导一个稳定的 Etag。
+//
+// 此前用 time.Now().UnixNano()：每次请求的 Etag 都不一样，客户端的条件请求
+// （If-None-Match）永远命中不了 304，Views / Folders 每次都要全量重取。
+func stableEtag(id string) string {
+	return fmt.Sprintf("%032x", sha256.Sum256([]byte(id)))
+}
+
 // libraryToDTO 把媒体库转换为 CollectionFolder DTO（Views 与条目详情共用，
 // 保证两个端点返回的同一媒体库字段完全一致）。
 func libraryToDTO(cfg *config.Config, lib database.Library) types.BaseItemDto {
@@ -112,7 +121,7 @@ func libraryToDTO(cfg *config.Config, lib database.Library) types.BaseItemDto {
 		ID:                      lib.ID,
 		Name:                    lib.Name,
 		Guid:                    lib.ID,
-		Etag:                    fmt.Sprintf("%032x", time.Now().UnixNano()),
+		Etag:                    stableEtag(lib.ID),
 		Type:                    "CollectionFolder",
 		IsFolder:                true,
 		CollectionType:          lib.Type,
@@ -194,7 +203,7 @@ func getFolders(mediaSvc *service.MediaService) gin.HandlerFunc {
 				ID:                      lib.ID,
 				Name:                    lib.Name,
 				Guid:                    lib.ID,
-				Etag:                    fmt.Sprintf("%032x", time.Now().UnixNano()),
+				Etag:                    stableEtag(lib.ID),
 				Type:                    "Folder",
 				IsFolder:                true,
 				CollectionType:          lib.Type,
@@ -518,15 +527,20 @@ func getAncestors(mediaSvc *service.MediaService) gin.HandlerFunc {
 	}
 }
 
-func getItemCounts(mediaSvc *service.MediaService) gin.HandlerFunc {
+// getItemCounts 返回各类型媒体的计数（RodelPlayer 用它显示库统计）。
+//
+// 走一条 GROUP BY，而不是"拉 10000 条进内存再数"：内存聚合每行都要反序列化，
+// 库上万条时明显变慢，而且受 10000 上限影响，超大库下计数是错的。
+func getItemCounts() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		mediaSvc := scopedMediaService(c)
-		// /emby/Items/Counts - 返回不同类型媒体的计数
-		// RodelPlayer 使用这个来显示库的统计信息
-
-		// 获取所有项目
-		items, _, err := mediaSvc.GetItems(c.GetString("user_id"), nil, true, nil, "", "", 10000, 0, nil, "", "", "", "", "")
-		if err != nil {
+		type typeCount struct {
+			Type string
+			Cnt  int64
+		}
+		var rows []typeCount
+		if err := scopedMediaDB(c).Model(&database.MediaItem{}).
+			Select("type AS type, COUNT(*) AS cnt").
+			Group("type").Scan(&rows).Error; err != nil {
 			slog.Error("获取媒体计数失败", "error", err)
 			c.JSON(http.StatusInternalServerError, ErrInternal)
 			return
@@ -551,50 +565,16 @@ func getItemCounts(mediaSvc *service.MediaService) gin.HandlerFunc {
 			"ItemCount":       0,
 		}
 
-		for _, item := range items {
-			key := item.Type + "Count"
+		var total int64
+		for _, row := range rows {
+			total += row.Cnt
+			key := row.Type + "Count"
 			if current, ok := counts[key]; ok {
-				counts[key] = current.(int) + 1
+				counts[key] = current.(int) + int(row.Cnt)
 			}
 		}
+		counts["ItemCount"] = int(total)
 
 		c.JSON(http.StatusOK, counts)
-	}
-}
-
-// getResume 返回继续观看列表
-func getResume(mediaSvc *service.MediaService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		mediaSvc := scopedMediaService(c)
-		userID := c.GetString("user_id")
-		paramUserID := c.Param("userId")
-		if paramUserID != "" {
-			userID = paramUserID
-		}
-
-		limit, _ := strconv.Atoi(c.DefaultQuery("Limit", "20"))
-
-		// 查询有播放进度但未播完的项目
-		var progresses []database.PlayProgress
-		database.Get().Where("user_id = ? AND position_ticks > 0 AND played = ?", userID, false).
-			Order("updated_at DESC").
-			Limit(limit).
-			Find(&progresses)
-
-		includeFields := []string{"*"}
-		items := make([]types.BaseItemDto, 0, len(progresses))
-		for _, p := range progresses {
-			item, err := mediaSvc.GetItemByID(p.ItemID)
-			if err != nil {
-				continue
-			}
-			dto := mediaSvc.ItemToDTO(item, userID, includeFields)
-			items = append(items, *dto)
-		}
-
-		c.JSON(http.StatusOK, types.ItemsResponse{
-			Items:            items,
-			TotalRecordCount: len(items),
-		})
 	}
 }

@@ -1,6 +1,7 @@
 package emby
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -45,13 +46,13 @@ func RegisterPlaybackRoutes(router *gin.Engine, cfg *config.Config) {
 	router.GET("/emby/items/:itemId/playbackinfo", auth, getPlaybackInfo(mediaSvc, playbackSvc, cfg, sgn))
 
 	// 302 重定向播放
-	router.GET("/emby/Videos/:itemId/stream", auth, streamVideo(mediaSvc))
-	router.GET("/emby/Videos/:itemId/stream.:container", auth, streamVideo(mediaSvc))
-	router.GET("/emby/videos/:itemId/stream", auth, streamVideo(mediaSvc))
-	router.GET("/emby/videos/:itemId/stream.:container", auth, streamVideo(mediaSvc))
+	router.GET("/emby/Videos/:itemId/stream", auth, streamVideo(mediaSvc, cfg))
+	router.GET("/emby/Videos/:itemId/stream.:container", auth, streamVideo(mediaSvc, cfg))
+	router.GET("/emby/videos/:itemId/stream", auth, streamVideo(mediaSvc, cfg))
+	router.GET("/emby/videos/:itemId/stream.:container", auth, streamVideo(mediaSvc, cfg))
 
-	router.GET("/emby/Items/:itemId/Download", auth, downloadVideo(mediaSvc))
-	router.GET("/emby/items/:itemId/download", auth, downloadVideo(mediaSvc))
+	router.GET("/emby/Items/:itemId/Download", auth, downloadVideo(mediaSvc, cfg))
+	router.GET("/emby/items/:itemId/download", auth, downloadVideo(mediaSvc, cfg))
 
 	// 字幕 (Task 4.1)
 	router.GET("/emby/Videos/:itemId/:mediaSourceId/Subtitles/:index/Stream.:format", auth, streamSubtitle(mediaSvc))
@@ -90,6 +91,12 @@ func playbackAuth(sgn *signer.Signer, expiryDays int) gin.HandlerFunc {
 						}
 						return
 					}
+					// 注意：PlaybackInfo 即使签名有效也仍然要过一遍 tokenAuth。
+					// 这是**有意设计**，不是可以顺手"修掉"的冗余：
+					// 签名会随直链一起发给外部播放器，泄漏面比 token 大得多；
+					// 而 PlaybackInfo 会暴露媒体源地址、码率、字幕等完整清单，
+					// 属于高价值端点，不单凭签名放行。其余播放端点（stream / 字幕）
+					// 只取字节流，签名即可。
 					if strings.Contains(strings.ToLower(c.FullPath()), "playbackinfo") {
 						tokenAuth(c)
 						return
@@ -251,7 +258,7 @@ func getPlaybackInfo(mediaSvc *service.MediaService, playbackSvc *service.Playba
 					Type:              "Audio",
 					Index:             len(mediaStreams),
 					Codec:             item.AudioCodec,
-					Language:          "en",
+					Language:          firstLanguage(item.Languages),
 					IsDefault:         true,
 					Channels:          intPtr(2),
 					IsInterlaced:      false,
@@ -345,7 +352,7 @@ func getPlaybackInfo(mediaSvc *service.MediaService, playbackSvc *service.Playba
 	}
 }
 
-func streamVideo(mediaSvc *service.MediaService) gin.HandlerFunc {
+func streamVideo(mediaSvc *service.MediaService, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.GetString("user_id")
 		itemID := c.Param("itemId")
@@ -398,11 +405,11 @@ func streamVideo(mediaSvc *service.MediaService) gin.HandlerFunc {
 		)
 
 		// 返回 302 重定向到实际播放 URL
-		redirectSource(c, selectedSource)
+		redirectSource(c, cfg, selectedSource)
 	}
 }
 
-func downloadVideo(mediaSvc *service.MediaService) gin.HandlerFunc {
+func downloadVideo(mediaSvc *service.MediaService, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		itemID := c.Param("itemId")
 
@@ -414,7 +421,7 @@ func downloadVideo(mediaSvc *service.MediaService) gin.HandlerFunc {
 		}
 
 		// 使用第一个源进行下载重定向
-		redirectSource(c, &sources[0])
+		redirectSource(c, cfg, &sources[0])
 	}
 }
 
@@ -453,14 +460,44 @@ func intPtr(v int) *int {
 	return &v
 }
 
+// firstLanguage 取条目 languages 字段的第一项。
+//
+// 音频流语言此前写死 "en"，导入数据里明明带了 languages 却没接上，
+// 客户端的音轨列表于是清一色英语——对多语言片源尤其明显。取不到就留空，
+// 让客户端走自己的默认，也好过硬报一个错误的语言。
+func firstLanguage(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	var langs []string
+	if err := json.Unmarshal([]byte(raw), &langs); err != nil {
+		return ""
+	}
+	for _, l := range langs {
+		if l != "" {
+			return l
+		}
+	}
+	return ""
+}
+
 func signedClientIP(c *gin.Context) string {
 	if cfg := config.Get(); cfg != nil && cfg.Playback.BindIP {
 		return c.ClientIP()
 	}
 	return ""
 }
-func redirectSource(c *gin.Context, src *database.MediaSource) {
-	cfg := config.Get()
+
+// redirectSource 把媒体源解析成最终 URL 并 302。
+//
+// cfg 由注册处注入（工程约定：handler 内不取全局配置），未注入时直接 500 而不是
+// 静默 fallback —— 全局配置在测试 / 嵌入式场景下可能是 nil，兜底只会把 panic 挪远。
+func redirectSource(c *gin.Context, cfg *config.Config, src *database.MediaSource) {
+	if cfg == nil {
+		slog.Error("redirectSource 缺少配置注入", "path", c.Request.URL.Path)
+		c.JSON(http.StatusInternalServerError, ErrInternal)
+		return
+	}
 	var resolver source.SourceResolver = source.Direct{}
 	if strings.EqualFold(src.Protocol, "strm") {
 		resolver = source.STRM{Root: cfg.Playback.STRMRoot}

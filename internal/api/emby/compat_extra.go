@@ -76,14 +76,19 @@ func nextUp() gin.HandlerFunc {
 			c.JSON(500, ErrInternal)
 			return
 		}
-		var progress []database.PlayProgress
-		if database.Get().Where("user_id = ?", c.GetString("user_id")).Find(&progress).Error != nil {
+		// 只取看过的条目。nextUp 的语义是"每部剧的第一集未看集"，
+		// 库里绝大多数进度都是看过的，把它们整行拉进内存只为建一个 bool map 纯属浪费。
+		// 同步限定在该用户（越权读别人的进度没有意义，且会放大内存占用）。
+		playedIDs := []string{}
+		if err := database.Get().Model(&database.PlayProgress{}).
+			Where("user_id = ? AND is_played = ?", c.GetString("user_id"), true).
+			Pluck("item_id", &playedIDs).Error; err != nil {
 			c.JSON(500, ErrInternal)
 			return
 		}
-		played := map[string]bool{}
-		for _, p := range progress {
-			played[p.ItemID] = p.IsPlayed
+		played := make(map[string]bool, len(playedIDs))
+		for _, id := range playedIDs {
+			played[id] = true
 		}
 		seen := map[string]bool{}
 		out := []types.BaseItemDto{}

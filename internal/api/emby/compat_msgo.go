@@ -31,11 +31,14 @@ func RegisterMSGOCompatRoutes(router *gin.Engine, cfg *config.Config) {
 	// 复用现成 handler（不重写业务逻辑，保证访问控制 / 字段契约一致）
 	itemHandler := getItem(mediaSvc, cfg)
 	latestHandler := getLatest(mediaSvc)
-	resumeHandler := getResume(mediaSvc)
-	countsHandler := getItemCounts(mediaSvc)
+	// 继续观看复用 userdata.go 的实现：那里走 repo 层的 JOIN 查询，
+	// 列名与排序都跟 PlayProgress 模型对齐。此前这里另有一份手写 SQL，
+	// 用了不存在的列（played / updated_at），错误被丢弃后恒返回空列表。
+	resumeHandler := getResumeItems(playbackSvc, mediaSvc)
+	countsHandler := getItemCounts()
 	viewsHandler := getViews(mediaSvc, cfg)
 	pbHandler := getPlaybackInfo(mediaSvc, playbackSvc, cfg, sgn)
-	streamHandler := streamVideo(mediaSvc)
+	streamHandler := streamVideo(mediaSvc, cfg)
 	subtitleHandler := streamSubtitle(mediaSvc)
 	seasonsHandler := getSeasons(mediaSvc)
 	episodesHandler := getEpisodes(mediaSvc)
